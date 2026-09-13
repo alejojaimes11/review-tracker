@@ -164,7 +164,7 @@ function BusinessCard({
 
   return (
     <Card className="p-5 transition-all hover:border-violet-500/30 hover:shadow-[0_0_28px_-10px_rgba(139,92,246,0.4)]">
-      <Link to={`/business/${business.id}`} className="block">
+      <Link to={`/business/${business.id}`} className={`block rounded-xl ${FOCUS_RING}`}>
         <div className="flex items-center gap-3">
           {business.photo_url ? (
             <img
@@ -434,7 +434,7 @@ function UpcomingBilling({ businesses }: { businesses: Business[] }) {
         {upcoming.map(({ business, date }) => (
           <li key={business.id} className="flex justify-between">
             <span>{business.name}</span>
-            <span className="text-gray-400 dark:text-gray-500">{formatDate(date.toISOString())}</span>
+            <span className="text-gray-400">{formatDate(date.toISOString())}</span>
           </li>
         ))}
       </ul>

@@ -661,7 +661,7 @@ export default function BusinessDetail() {
         </Card>
       )}
 
-      <p className="mb-2 text-xs text-gray-400 dark:text-gray-500">
+      <p className="mb-2 text-xs text-gray-400">
         Seguimiento iniciado el {new Date(business.started_at).toLocaleDateString('es-ES')}
         {business.last_synced_at && ` · última actualización ${formatDateTime(business.last_synced_at)}`}
       </p>
