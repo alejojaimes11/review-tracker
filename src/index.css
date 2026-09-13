@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply font-sans text-zinc-900 antialiased dark:text-zinc-100;
+  background-color: #fafafa;
+  background-image: radial-gradient(1000px circle at 15% -10%, rgba(139, 92, 246, 0.07), transparent 55%);
+  background-attachment: fixed;
+}
+
+/* Dark is the app's default identity, not just a toggle — glass cards read as
+   glass only against something with depth, so the page carries a faint
+   violet/fuchsia glow instead of a flat near-black fill. */
+.dark body {
+  background-color: #08080d;
+  background-image:
+    radial-gradient(1200px circle at 15% -10%, rgba(139, 92, 246, 0.18), transparent 55%),
+    radial-gradient(900px circle at 100% 0%, rgba(217, 70, 239, 0.1), transparent 50%);
+}
+
+::selection {
+  @apply bg-violet-600/25;
+}
+
+/* Themed scrollbar — the browser default reads as unfinished against a
+   custom dark/glass surface. One violet-tinted thumb works in both themes. */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(139, 92, 246, 0.35) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(139, 92, 246, 0.35);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(139, 92, 246, 0.55);
+}

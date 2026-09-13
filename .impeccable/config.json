@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "ai-color-palette",
+        "value": "*",
+        "files": [
+          "src/pages/Dashboard.tsx"
+        ],
+        "createdAt": "2026-08-27T01:52:34.143Z",
+        "reason": "user confirmed: user picked 'oscuro y moderno' with violet accent from an explicit set of style-direction options, then said 'ME ENCANTA' after seeing it live, and later asked to add more visual elements in the same language"
+      }
+    ]
+  }
+}
