@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { FunctionsHttpError } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import type { Business, ReviewSnapshot } from '../types'
 
@@ -246,7 +247,17 @@ export function useAnalyzeBusiness() {
       const { data, error } = await supabase.functions.invoke('analyze-business', {
         body: { business_id: businessId },
       })
-      if (error) throw error
+      if (error) {
+        // supabase-js collapses a non-2xx response into a generic
+        // "Edge Function returned a non-2xx status code" — the function's
+        // actual { error: "..." } body (e.g. "GEMINI_API_KEY no está
+        // configurada.") lives in error.context, the raw Response.
+        if (error instanceof FunctionsHttpError) {
+          const body = await error.context.json().catch(() => null)
+          throw new Error(body?.error ?? error.message)
+        }
+        throw error
+      }
       if (data?.error) throw new Error(data.error)
       return data as BusinessAnalysis
     },

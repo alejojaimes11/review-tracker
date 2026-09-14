@@ -65,13 +65,19 @@ Basándote ÚNICAMENTE en estas reseñas — no inventes nada que no esté respa
 Respondé SOLO el JSON, sin texto adicional antes ni después.`
 
     const aiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${geminiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 400 },
+          // gemini-3.6-flash spends part of maxOutputTokens on internal
+          // "thinking" before it writes the actual answer (thoughtsTokenCount
+          // in the response) — thinkingLevel "low" keeps that minimal, and
+          // 2048 leaves enough budget left over for the JSON reply itself.
+          // Confirmed against the live API: without this the response was
+          // getting cut off mid-JSON.
+          generationConfig: { maxOutputTokens: 2048, thinkingConfig: { thinkingLevel: 'low' } },
         }),
       },
     )
