@@ -11,6 +11,12 @@
         ],
         "createdAt": "2026-08-27T01:52:34.143Z",
         "reason": "user confirmed: user picked 'oscuro y moderno' with violet accent from an explicit set of style-direction options, then said 'ME ENCANTA' after seeing it live, and later asked to add more visual elements in the same language"
+      },
+      {
+        "rule": "overused-font",
+        "value": "inter",
+        "createdAt": "2026-09-14T04:36:17.737Z",
+        "reason": "Inter es la tipografía elegida desde el rediseño v1 (agosto 2026, ver PROGRESO.md changelog 2026-08-02), no una decisión de esta sesión"
       }
     ]
   }
