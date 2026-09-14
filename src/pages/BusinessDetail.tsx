@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
+  useAnalyzeBusiness,
   useBusiness,
   useDeleteBusiness,
   useMonthlyReports,
@@ -433,6 +434,57 @@ function MonthlyReports({ businessId, businessName }: { businessId: string; busi
   )
 }
 
+/** MarketPulse block 1 — on-demand only, nothing runs until the button is clicked, nothing persisted. */
+function AiInsights({ businessId }: { businessId: string }) {
+  const [open, setOpen] = useState(false)
+  const analyze = useAnalyzeBusiness()
+
+  function handleClick() {
+    setOpen(true)
+    analyze.mutate(businessId)
+  }
+
+  return (
+    <div>
+      <Button variant="secondary" onClick={handleClick} disabled={analyze.isPending}>
+        <Icon path="sparkle" className="h-4 w-4" />
+        {analyze.isPending ? 'Analizando…' : 'Analizar con IA'}
+      </Button>
+
+      {open && (
+        <Card className="mt-2 p-4">
+          {analyze.isPending && (
+            <p className="text-sm text-gray-500 dark:text-gray-400">Leyendo las reseñas recientes…</p>
+          )}
+          {analyze.isError && (
+            <p className="text-sm text-red-600 dark:text-red-400">{(analyze.error as Error).message}</p>
+          )}
+          {analyze.data && (
+            <div className="space-y-3 text-sm">
+              <div>
+                <p className="mb-1 font-medium text-emerald-600 dark:text-emerald-400">Qué está haciendo bien</p>
+                <p className="text-gray-700 dark:text-gray-300">{analyze.data.bien || '—'}</p>
+              </div>
+              <div>
+                <p className="mb-1 font-medium text-amber-600 dark:text-amber-400">Qué debería mejorar</p>
+                <p className="text-gray-700 dark:text-gray-300">{analyze.data.mejorar || '—'}</p>
+              </div>
+              <div>
+                <p className="mb-1 font-medium text-violet-600 dark:text-violet-400">Recomendación</p>
+                <p className="text-gray-700 dark:text-gray-300">{analyze.data.recomendacion || '—'}</p>
+              </div>
+              <p className="pt-1 text-xs text-gray-400">
+                Basado en {analyze.data.reviewCount} reseña{analyze.data.reviewCount === 1 ? '' : 's'} reciente
+                {analyze.data.reviewCount === 1 ? '' : 's'} con texto.
+              </p>
+            </div>
+          )}
+        </Card>
+      )}
+    </div>
+  )
+}
+
 function aggregateByDay(snapshots: ReviewSnapshot[], baseline: number) {
   const ascending = [...snapshots].reverse()
   const byDay = new Map<string, { reviewCount: number; rating: number | null }>()
@@ -670,6 +722,7 @@ export default function BusinessDetail() {
         <SettingsPanel business={business} />
         <MonthlyReports businessId={business.id} businessName={business.name} />
         <HistoryPanel business={business} snapshots={snapshots} loading={loadingSnapshots} />
+        <AiInsights businessId={business.id} />
       </div>
 
       <h2 className="mb-3 mt-8 text-lg font-medium text-gray-900 dark:text-gray-100">Crecimiento de reseñas</h2>

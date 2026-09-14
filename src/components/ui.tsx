@@ -35,6 +35,7 @@ const ICONS = {
   cap: 'M12 4 3 9l9 4 8-3.7V15h2V9zM7 12.5V17c0 1.4 2.5 3 5 3s5-1.6 5-3v-4.5',
   tag: 'M4 4h7l9 9-7 7-9-9zM8 8h.01',
   check: 'M5 13l4 4L19 7',
+  sparkle: 'M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5L12 2zM19 14l.6 2 2 .6-2 .6-.6 2-.6-2-2-.6 2-.6z',
 } as const
 
 export function Icon({

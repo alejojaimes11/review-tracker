@@ -52,18 +52,62 @@ export async function scrapePlace(input: string, apiToken: string): Promise<Scra
   }
 }
 
-/** Re-scrapes a known Maps URL — used by the daily sync job. */
+export interface RawReview {
+  reviewId: string
+  text: string | null
+  stars: number | null
+  publishedAtDate: string | null
+}
+
+/** Re-scrapes a known Maps URL — used by the recurring sync job. */
 export async function getReviewStats(
   mapsUrl: string,
   apiToken: string,
-): Promise<{ rating: number | null; reviewCount: number }> {
+): Promise<{ rating: number | null; reviewCount: number; reviews: RawReview[] }> {
   const items = await runScraper(
-    { startUrls: [{ url: mapsUrl }], maxCrawledPlacesPerSearch: 1, scrapePlaceDetailPage: true },
+    {
+      startUrls: [{ url: mapsUrl }],
+      maxCrawledPlacesPerSearch: 1,
+      scrapePlaceDetailPage: true,
+      // MarketPulse block 1: pull recent review text alongside the
+      // rating/count we already tracked. newest-first + a small cap keeps
+      // this from re-fetching (and re-billing) a business's entire review
+      // history on every sync — see PROGRESO.md for the cost reasoning.
+      maxReviews: 20,
+      reviewsSort: 'newest',
+      // Explicitly opt out of reviewer identity (name, photo, profile) —
+      // we only want the review content itself, not personal data about
+      // whoever left it.
+      scrapeReviewsPersonalData: false,
+    },
     apiToken,
   )
   const place = items?.[0]
   if (!place) {
     throw new Error('El negocio ya no se encuentra en esa URL de Google Maps.')
   }
-  return { rating: place.totalScore ?? null, reviewCount: place.reviewsCount ?? 0 }
+
+  // Defensive: the exact shape of `place.reviews` hasn't been confirmed
+  // against a live payload yet (per Apify's docs it should be an array on
+  // the place item). If it's missing or shaped differently, degrade to no
+  // reviews rather than breaking the rating/count sync that's worked
+  // reliably for weeks — that part must never depend on this.
+  let reviews: RawReview[] = []
+  try {
+    if (Array.isArray(place.reviews)) {
+      reviews = place.reviews
+        .filter((r: unknown): r is Record<string, unknown> => !!r && typeof r === 'object')
+        .map((r: Record<string, unknown>) => ({
+          reviewId: String(r.reviewId ?? ''),
+          text: typeof r.text === 'string' ? r.text : null,
+          stars: typeof r.stars === 'number' ? r.stars : null,
+          publishedAtDate: typeof r.publishedAtDate === 'string' ? r.publishedAtDate : null,
+        }))
+        .filter((r) => r.reviewId)
+    }
+  } catch {
+    reviews = []
+  }
+
+  return { rating: place.totalScore ?? null, reviewCount: place.reviewsCount ?? 0, reviews }
 }

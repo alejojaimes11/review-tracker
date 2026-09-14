@@ -232,6 +232,27 @@ export function useMonthlyReports(businessId: string) {
   })
 }
 
+export interface BusinessAnalysis {
+  bien: string
+  mejorar: string
+  recomendacion: string
+  reviewCount: number
+}
+
+/** MarketPulse block 1: on-demand AI read of a business's recent reviews. Not persisted anywhere — regenerated on each click. */
+export function useAnalyzeBusiness() {
+  return useMutation({
+    mutationFn: async (businessId: string): Promise<BusinessAnalysis> => {
+      const { data, error } = await supabase.functions.invoke('analyze-business', {
+        body: { business_id: businessId },
+      })
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+      return data as BusinessAnalysis
+    },
+  })
+}
+
 export function useUploadPhoto(id: string) {
   const queryClient = useQueryClient()
   return useMutation({

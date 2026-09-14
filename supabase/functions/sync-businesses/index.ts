@@ -67,6 +67,28 @@ Deno.serve(async (req) => {
               rating: stats.rating,
             })
             if (snapshotError) throw new Error(snapshotError.message)
+
+            // MarketPulse block 1: best-effort save of individual review
+            // text. Deliberately isolated from the block above — the
+            // rating/count sync has worked reliably for weeks and must
+            // keep working even if this new, unproven part fails. A
+            // problem here never surfaces as last_sync_error on the
+            // business (that badge means "we can't read this business at
+            // all", which isn't true just because review-saving hiccuped).
+            if (stats.reviews.length > 0) {
+              try {
+                const rows = stats.reviews.map((r) => ({
+                  business_id: business.id,
+                  review_id: r.reviewId,
+                  rating: r.stars,
+                  text: r.text,
+                  published_at: r.publishedAtDate,
+                }))
+                await supabase.from('reviews').upsert(rows, { onConflict: 'review_id', ignoreDuplicates: true })
+              } catch {
+                // swallow — see comment above
+              }
+            }
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err)
             // Record the failure on the business itself (dashboard surfaces
