@@ -52,21 +52,10 @@ function nextBillingDate(day: number, from: Date) {
 function Logo() {
   return (
     <div className="flex items-center gap-2.5">
-      <svg viewBox="0 0 512 512" className="h-8 w-8 rounded-[9px]" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <linearGradient id="logo-bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stopColor="#8B5CF6" />
-            <stop offset="1" stopColor="#D946EF" />
-          </linearGradient>
-        </defs>
-        <rect width="512" height="512" rx="112" fill="url(#logo-bg)" />
-        <g transform="translate(70,86) scale(9.5)">
-          <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 0 0 .95.69h4.914c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 0 0-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 0 0-1.176 0l-3.976 2.888c-.783.57-1.838-.196-1.538-1.118l1.518-4.674a1 1 0 0 0-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 0 0 .951-.69z" fill="#fff" />
-        </g>
-        <path d="M 300 400 L 300 340 L 340 340 M 300 340 L 430 210" stroke="#fff" strokeWidth="26" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M370 210 L430 210 L430 270" stroke="#fff" strokeWidth="26" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-      <span className="text-lg font-semibold tracking-tight text-gray-900 dark:text-gray-100">Review Tracker</span>
+      <img src="/icon.svg" alt="" className="h-8 w-8 rounded-[9px]" />
+      <span className="text-lg font-semibold tracking-tight text-gray-900 dark:text-gray-100">
+        Market<span className="text-violet-500 dark:text-violet-400">Pulse</span>
+      </span>
     </div>
   )
 }

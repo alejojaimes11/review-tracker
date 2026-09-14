@@ -1,4 +1,4 @@
-# Review Tracker (MVP)
+# MarketPulse (antes Review Tracker)
 
 Trackea cuántas reseñas de Google gana un negocio desde que se agrega hasta que se detiene el seguimiento. Usa [Apify](https://apify.com) (actor `compass/crawler-google-places`) para consultar nombre, rating y número de reseñas — no depende de Google Cloud ni de la API oficial de Google.
 

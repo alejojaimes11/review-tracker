@@ -28,8 +28,8 @@ export default defineConfig(({ mode }) => {
         injectRegister: false,
         includeAssets: ['icon.svg', 'apple-touch-icon.png'],
         manifest: {
-          name: 'Review Tracker',
-          short_name: 'Reviews',
+          name: 'MarketPulse',
+          short_name: 'MarketPulse',
           start_url: '/',
           display: 'standalone',
           background_color: '#08080d',
