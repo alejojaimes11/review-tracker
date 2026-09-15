@@ -34,3 +34,7 @@ supabase/.temp
 # Stray one-off scripts (should never linger, but just in case)
 *.tmp.mjs
 *.tmp.ts
+
+# Local tooling cache (impeccable design-review skill) — stores absolute
+# local file paths, not project content; never something to version.
+.impeccable/

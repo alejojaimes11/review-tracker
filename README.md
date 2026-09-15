@@ -70,7 +70,7 @@ En el celular, entra a esa URL y usa "Agregar a pantalla de inicio" (Android/iOS
 
 ## Qué se guarda (y qué no)
 
-Solo lo mínimo necesario para calcular el crecimiento: nombre, URL de Google Maps, rating, número de reseñas, y la fecha de cada consulta (`review_snapshots.created_at`). No se almacenan teléfonos, emails, redes sociales, fotos, horarios, coordenadas ni el texto de las reseñas.
+Lo mínimo necesario para calcular el crecimiento: nombre, URL de Google Maps, rating, número de reseñas, y la fecha de cada consulta (`review_snapshots.created_at`). Desde MarketPulse (bloque 1), también se guardan hasta 20 reseñas individuales recientes por negocio (rating, texto y fecha — tabla `reviews`) para poder generar el análisis con IA. No se almacenan teléfonos, emails, redes sociales, fotos, horarios, coordenadas, ni ningún dato de identidad de quien dejó la reseña (nombre, foto o perfil del reviewer).
 
 ## Notas
 
