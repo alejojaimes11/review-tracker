@@ -13,21 +13,10 @@ import {
 } from '../api/businesses'
 import { useTheme } from '../hooks/useTheme'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
-import {
-  Badge,
-  Button,
-  Card,
-  CRITICAL_COLOR,
-  Delta,
-  FOCUS_RING,
-  Icon,
-  ProgressBar,
-  Skeleton,
-  StarRating,
-  WARNING_COLOR,
-} from '../components/ui'
+import { Button, Card, Delta, FOCUS_RING, Icon, ProgressBar, Skeleton, StarRating } from '../components/ui'
+import { AnalysisView } from '../components/AnalysisView'
 import { getCategoryVisual, monthlyGained } from '../lib/business'
-import type { Analysis, AnalysisAction, Business, ReviewSnapshot } from '../types'
+import type { Analysis, Business, ReviewSnapshot } from '../types'
 
 function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString('es-ES', {
@@ -443,70 +432,6 @@ function MonthlyReports({ businessId, businessName }: { businessId: string; busi
           )}
         </Card>
       )}
-    </div>
-  )
-}
-
-const PRIORITY_STYLE: Record<AnalysisAction['prioridad'], { color: string; label: string; icon: 'warning' | 'tag' }> = {
-  alta: { color: CRITICAL_COLOR, label: 'Prioridad alta', icon: 'warning' },
-  media: { color: WARNING_COLOR, label: 'Prioridad media', icon: 'tag' },
-  baja: { color: '#94a3b8', label: 'Prioridad baja', icon: 'tag' },
-}
-
-function AnalysisView({ analysis }: { analysis: Analysis }) {
-  return (
-    <div className="space-y-3 text-sm">
-      <div>
-        <p className="mb-1 font-medium text-emerald-600 dark:text-emerald-400">Qué está haciendo bien</p>
-        <p className="text-gray-700 dark:text-gray-300">{analysis.bien || '—'}</p>
-      </div>
-      <div>
-        <p className="mb-1 font-medium text-amber-600 dark:text-amber-400">Qué debería mejorar</p>
-        <p className="text-gray-700 dark:text-gray-300">{analysis.mejorar || '—'}</p>
-      </div>
-
-      <div>
-        <p className="mb-2 font-medium text-violet-600 dark:text-violet-400">Qué hacer primero</p>
-        {analysis.acciones.length === 0 ? (
-          <p className="text-gray-500 dark:text-gray-400">
-            Sin acciones urgentes: las reseñas recientes no señalan ningún problema concreto.
-          </p>
-        ) : (
-          <ol className="space-y-2">
-            {analysis.acciones.map((a, i) => {
-              const style = PRIORITY_STYLE[a.prioridad]
-              return (
-                <li
-                  key={i}
-                  className="rounded-xl border border-black/5 bg-black/[0.02] p-3 dark:border-white/10 dark:bg-white/[0.03]"
-                >
-                  <div className="mb-1.5 flex flex-wrap items-center gap-2">
-                    <Badge color={style.color} icon={style.icon}>
-                      {style.label}
-                    </Badge>
-                    <span className="text-xs text-gray-500 dark:text-gray-400">
-                      En {a.respaldo} de {analysis.review_count} reseñas
-                    </span>
-                  </div>
-                  <p className="font-medium text-gray-900 dark:text-gray-100">{a.accion}</p>
-                  {a.motivo && <p className="mt-0.5 text-gray-600 dark:text-gray-400">{a.motivo}</p>}
-                  {a.cita && (
-                    <p className="mt-1.5 border-l-2 border-violet-400/50 pl-2 text-xs italic text-gray-500 dark:text-gray-400">
-                      “{a.cita}”
-                    </p>
-                  )}
-                </li>
-              )
-            })}
-          </ol>
-        )}
-      </div>
-
-      <p className="pt-1 text-xs text-gray-400">
-        {formatDateTime(analysis.created_at)} · basado en {analysis.review_count} reseña
-        {analysis.review_count === 1 ? '' : 's'} reciente{analysis.review_count === 1 ? '' : 's'} con texto ·{' '}
-        {analysis.provider}
-      </p>
     </div>
   )
 }

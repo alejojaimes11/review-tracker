@@ -1,28 +1,74 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 import { corsHeaders } from '../_shared/cors.ts'
 
-// MarketPulse block 2: on-demand AI read of a business's recent reviews,
-// now returning prioritized concrete actions (not one generic sentence) and
-// saving every analysis so the dashboard can show history.
+// MarketPulse block 2: a complete, evidence-backed read of a business's
+// recent reviews — summary, real numbers, strengths, opportunities, themes,
+// a step-by-step action plan and ready-to-send replies — saved to `analyses`
+// so the dashboard can show it (and its history) without calling the AI again.
 
 type Priority = 'alta' | 'media' | 'baja'
+type Horizon = 'esta semana' | 'este mes' | 'próximos 3 meses'
+
+interface Strength {
+  tema: string
+  detalle: string
+  respaldo: number
+  cita: string
+}
+
+interface Opportunity {
+  tema: string
+  detalle: string
+  gravedad: Priority
+  respaldo: number
+  cita: string
+}
+
+interface ThemeCount {
+  nombre: string
+  positivas: number
+  negativas: number
+}
 
 interface Action {
   accion: string
   motivo: string
   prioridad: Priority
+  plazo: Horizon
+  impacto: string
+  pasos: string[]
   respaldo: number
   cita: string
 }
 
+interface SuggestedReply {
+  rating: number | null
+  resena: string
+  respuesta: string
+}
+
 interface Parsed {
-  bien: string
-  mejorar: string
+  resumen: string
+  fortalezas: Strength[]
+  oportunidades: Opportunity[]
+  temas: ThemeCount[]
   acciones: Action[]
+  respuestas: SuggestedReply[]
+}
+
+interface Review {
+  rating: number | null
+  text: string
+  published_at: string | null
 }
 
 const PRIORITY_ORDER: Record<Priority, number> = { alta: 0, media: 1, baja: 2 }
-const MAX_ACTIONS = 3
+const MAX_REVIEWS = 40
+const MAX_STRENGTHS = 5
+const MAX_OPPORTUNITIES = 5
+const MAX_THEMES = 8
+const MAX_ACTIONS = 5
+const MAX_REPLIES = 3
 
 /** Lowercase, accent-less, punctuation-less form — used only to check a quote really came from a review. */
 function normalize(s: string) {
@@ -35,13 +81,65 @@ function normalize(s: string) {
     .trim()
 }
 
+const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
+const asArray = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
+const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object'
+
+function toPriority(v: unknown): Priority {
+  const p = str(v).toLowerCase()
+  return p === 'alta' || p === 'media' || p === 'baja' ? p : 'media'
+}
+
+function toHorizon(v: unknown): Horizon {
+  const h = normalize(str(v))
+  if (h.includes('semana')) return 'esta semana'
+  if (h.includes('3') || h.includes('tres') || h.includes('trimestre')) return 'próximos 3 meses'
+  return 'este mes'
+}
+
+/** Real numbers computed from the data itself — never asked of the model. */
+function computeStats(reviews: Review[]) {
+  const ratings = reviews.map((r) => r.rating).filter((r): r is number => typeof r === 'number')
+  const n = ratings.length
+  const distribucion: Record<string, number> = { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 }
+  for (const r of ratings) distribucion[String(Math.min(Math.max(Math.round(r), 1), 5))]++
+
+  const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null)
+  const round1 = (x: number | null) => (x === null ? null : Math.round(x * 10) / 10)
+
+  // `reviews` is newest-first: compare the newer half with the older half.
+  let tendencia: 'sube' | 'baja' | 'estable' | null = null
+  let promedioRecientes: number | null = null
+  let promedioAnteriores: number | null = null
+  if (n >= 8) {
+    const half = Math.floor(n / 2)
+    promedioRecientes = round1(avg(ratings.slice(0, half)))
+    promedioAnteriores = round1(avg(ratings.slice(half)))
+    const diff = (avg(ratings.slice(0, half)) ?? 0) - (avg(ratings.slice(half)) ?? 0)
+    tendencia = diff >= 0.3 ? 'sube' : diff <= -0.3 ? 'baja' : 'estable'
+  }
+
+  return {
+    total: reviews.length,
+    con_calificacion: n,
+    promedio: round1(avg(ratings)),
+    distribucion,
+    positivas_pct: n ? Math.round((ratings.filter((r) => r >= 4).length / n) * 100) : 0,
+    negativas_pct: n ? Math.round((ratings.filter((r) => r <= 2).length / n) * 100) : 0,
+    tendencia,
+    promedio_recientes: promedioRecientes,
+    promedio_anteriores: promedioAnteriores,
+  }
+}
+
 /**
  * Turns the model's raw text into a validated analysis, or null when it isn't
  * usable (so the caller can retry / fall back to another provider instead of
- * showing a broken result). Quotes are only kept when they genuinely appear in
- * one of the reviews we sent — otherwise they're dropped rather than trusted.
+ * showing a broken result). Every quote is only kept when it genuinely appears
+ * in one of the reviews we sent, and every count is clamped to what's possible
+ * — the model is never trusted on its own.
  */
-function parseAnalysis(raw: string, reviewTexts: string[]): Parsed | null {
+function parseAnalysis(raw: string, reviews: Review[]): Parsed | null {
   const start = raw.indexOf('{')
   const end = raw.lastIndexOf('}')
   if (start === -1 || end <= start) return null
@@ -53,35 +151,88 @@ function parseAnalysis(raw: string, reviewTexts: string[]): Parsed | null {
     return null
   }
 
-  if (typeof data.bien !== 'string' || typeof data.mejorar !== 'string' || !Array.isArray(data.acciones)) {
-    return null
-  }
+  const resumen = str(data.resumen)
+  if (!resumen || !Array.isArray(data.acciones)) return null
 
-  const normalizedReviews = reviewTexts.map(normalize)
-  const total = reviewTexts.length
+  const total = reviews.length
+  const normalizedReviews = reviews.map((r) => normalize(r.text))
+
+  const quote = (v: unknown) => {
+    const cita = str(v).replace(/^["“”']+|["“”']+$/g, '')
+    const norm = normalize(cita)
+    const grounded = norm.length >= 8 && normalizedReviews.some((r) => r.includes(norm))
+    return grounded ? cita.slice(0, 220) : ''
+  }
+  const count = (v: unknown) => Math.min(Math.max(typeof v === 'number' ? Math.round(v) : 1, 1), total)
+  const tally = (v: unknown) => Math.min(Math.max(typeof v === 'number' ? Math.round(v) : 0, 0), total)
+
+  const fortalezas: Strength[] = asArray(data.fortalezas)
+    .filter(isObject)
+    .filter((f) => str(f.tema) && str(f.detalle))
+    .map((f) => ({ tema: str(f.tema), detalle: str(f.detalle), respaldo: count(f.respaldo), cita: quote(f.cita) }))
+    .sort((a, b) => b.respaldo - a.respaldo)
+    .slice(0, MAX_STRENGTHS)
+
+  const oportunidades: Opportunity[] = asArray(data.oportunidades)
+    .filter(isObject)
+    .filter((o) => str(o.tema) && str(o.detalle))
+    .map((o) => ({
+      tema: str(o.tema),
+      detalle: str(o.detalle),
+      gravedad: toPriority(o.gravedad),
+      respaldo: count(o.respaldo),
+      cita: quote(o.cita),
+    }))
+    .sort((a, b) => PRIORITY_ORDER[a.gravedad] - PRIORITY_ORDER[b.gravedad] || b.respaldo - a.respaldo)
+    .slice(0, MAX_OPPORTUNITIES)
+
+  const temas: ThemeCount[] = asArray(data.temas)
+    .filter(isObject)
+    .filter((t) => str(t.nombre))
+    .map((t) => {
+      const positivas = tally(t.positivas)
+      // A theme can't have more mentions than there are reviews.
+      return { nombre: str(t.nombre), positivas, negativas: Math.min(tally(t.negativas), total - positivas) }
+    })
+    .filter((t) => t.positivas + t.negativas > 0)
+    .sort((a, b) => b.positivas + b.negativas - (a.positivas + a.negativas))
+    .slice(0, MAX_THEMES)
 
   const acciones: Action[] = data.acciones
-    .filter((a): a is Record<string, unknown> => !!a && typeof a === 'object')
-    .filter((a) => typeof a.accion === 'string' && a.accion.trim().length > 0)
-    .map((a) => {
-      const p = typeof a.prioridad === 'string' ? a.prioridad.toLowerCase().trim() : ''
-      const prioridad: Priority = p === 'alta' || p === 'media' || p === 'baja' ? p : 'media'
-      const respaldoRaw = typeof a.respaldo === 'number' ? Math.round(a.respaldo) : 1
-      const cita = typeof a.cita === 'string' ? a.cita.trim().replace(/^["“”']+|["“”']+$/g, '') : ''
-      const citaNorm = normalize(cita)
-      const grounded = citaNorm.length >= 8 && normalizedReviews.some((r) => r.includes(citaNorm))
-      return {
-        accion: String(a.accion).trim(),
-        motivo: typeof a.motivo === 'string' ? a.motivo.trim() : '',
-        prioridad,
-        respaldo: Math.min(Math.max(respaldoRaw, 1), total),
-        cita: grounded ? cita.slice(0, 200) : '',
-      }
-    })
+    .filter(isObject)
+    .filter((a) => str(a.accion))
+    .map((a) => ({
+      accion: str(a.accion),
+      motivo: str(a.motivo),
+      prioridad: toPriority(a.prioridad),
+      plazo: toHorizon(a.plazo),
+      impacto: str(a.impacto),
+      pasos: asArray(a.pasos)
+        .map(str)
+        .filter(Boolean)
+        .slice(0, 4),
+      respaldo: count(a.respaldo),
+      cita: quote(a.cita),
+    }))
     .sort((a, b) => PRIORITY_ORDER[a.prioridad] - PRIORITY_ORDER[b.prioridad])
     .slice(0, MAX_ACTIONS)
 
-  return { bien: data.bien.trim(), mejorar: data.mejorar.trim(), acciones }
+  // The model only says WHICH review (by number) to answer and drafts the
+  // reply; the rating and the review text shown to the user come from our
+  // own data, so they can never be misquoted.
+  const respuestas: SuggestedReply[] = asArray(data.respuestas)
+    .filter(isObject)
+    .map((r) => {
+      const idx = typeof r.numero === 'number' ? Math.round(r.numero) - 1 : -1
+      const review = reviews[idx]
+      return review && str(r.respuesta)
+        ? { rating: review.rating, resena: review.text.slice(0, 300), respuesta: str(r.respuesta).slice(0, 700) }
+        : null
+    })
+    .filter((r): r is SuggestedReply => r !== null)
+    .slice(0, MAX_REPLIES)
+
+  return { resumen, fortalezas, oportunidades, temas, acciones, respuestas }
 }
 
 async function callGemini(prompt: string, key: string): Promise<string> {
@@ -94,9 +245,10 @@ async function callGemini(prompt: string, key: string): Promise<string> {
         contents: [{ parts: [{ text: prompt }] }],
         // gemini-3.6-flash spends part of maxOutputTokens on internal
         // "thinking" before it writes the actual answer — thinkingLevel
-        // "low" keeps that minimal and 2048 leaves room for the JSON itself
-        // (confirmed against the live API: smaller limits cut it mid-JSON).
-        generationConfig: { maxOutputTokens: 2048, thinkingConfig: { thinkingLevel: 'low' } },
+        // "low" keeps that minimal. The complete analysis is a much longer
+        // JSON than the old 3-field one, so the output budget is generous
+        // (a too-small limit cuts the JSON off mid-way).
+        generationConfig: { maxOutputTokens: 8192, thinkingConfig: { thinkingLevel: 'low' } },
       }),
     },
   )
@@ -144,58 +296,80 @@ Deno.serve(async (req) => {
 
     const { data: business, error: businessError } = await supabase
       .from('businesses')
-      .select('name')
+      .select('name, category')
       .eq('id', business_id)
       .single()
     if (businessError || !business) throw new Error('Negocio no encontrado.')
 
-    const { data: reviews, error: reviewsError } = await supabase
+    const { data: rawReviews, error: reviewsError } = await supabase
       .from('reviews')
       .select('rating, text, published_at')
       .eq('business_id', business_id)
       .order('published_at', { ascending: false })
-      .limit(20)
+      .limit(MAX_REVIEWS)
     if (reviewsError) throw new Error(reviewsError.message)
 
-    const withText = (reviews ?? []).filter(
-      (r): r is { rating: number | null; text: string; published_at: string | null } =>
-        typeof r.text === 'string' && r.text.trim().length > 0,
+    const reviews = (rawReviews ?? []).filter(
+      (r): r is Review => typeof r.text === 'string' && r.text.trim().length > 0,
     )
 
-    if (withText.length === 0) {
+    if (reviews.length === 0) {
       throw new Error(
         'Todavía no hay reseñas con texto guardadas para este negocio. El sync las trae de a poco cada 6h — probá de nuevo más tarde.',
       )
     }
 
-    const reviewTexts = withText.map((r) => r.text)
-    const reviewsBlock = withText.map((r) => `- (${r.rating ?? '?'}★) ${r.text}`).join('\n')
+    const stats = computeStats(reviews)
+    const reviewsBlock = reviews
+      .map((r, i) => `[${i + 1}] (${r.rating ?? '?'}★, ${r.published_at?.slice(0, 10) ?? 's/f'}) ${r.text}`)
+      .join('\n')
 
-    const prompt = `Sos un asistente que ayuda a dueños de negocios locales a entender sus reseñas de Google Maps y a decidir qué hacer.
+    const prompt = `Sos un consultor que ayuda a dueños de negocios locales a entender sus reseñas de Google Maps y a decidir qué hacer. Tu análisis tiene que ser COMPLETO, específico y útil, no genérico.
 
-Negocio: ${business.name}
+Negocio: ${business.name}${business.category ? ` (${business.category})` : ''}
 
-Reseñas recientes (${withText.length}, más nuevas primero):
+Reseñas recientes (${reviews.length}, más nuevas primero, cada una con su número):
 ${reviewsBlock}
 
 Basándote ÚNICAMENTE en estas reseñas — no inventes nada que no esté respaldado por ellas — respondé con un JSON con exactamente esta forma, en español:
 
 {
-  "bien": "una o dos frases: qué hace bien el negocio",
-  "mejorar": "una o dos frases: qué debería mejorar",
+  "resumen": "3 a 4 frases: diagnóstico general de cómo perciben al negocio sus clientes, qué predomina y qué es lo más importante a saber",
+  "fortalezas": [
+    { "tema": "nombre corto", "detalle": "1 a 2 frases concretas", "respaldo": 4, "cita": "..." }
+  ],
+  "oportunidades": [
+    { "tema": "nombre corto", "detalle": "1 a 2 frases concretas", "gravedad": "alta", "respaldo": 3, "cita": "..." }
+  ],
+  "temas": [
+    { "nombre": "Atención", "positivas": 7, "negativas": 2 }
+  ],
   "acciones": [
-    { "accion": "...", "motivo": "...", "prioridad": "alta", "respaldo": 3, "cita": "..." }
+    {
+      "accion": "...",
+      "motivo": "...",
+      "prioridad": "alta",
+      "plazo": "esta semana",
+      "impacto": "...",
+      "pasos": ["...", "..."],
+      "respaldo": 3,
+      "cita": "..."
+    }
+  ],
+  "respuestas": [
+    { "numero": 5, "respuesta": "..." }
   ]
 }
 
-Reglas para "acciones":
-- Máximo ${MAX_ACTIONS}, ordenadas de más a menos prioritaria.
-- "accion": una acción concreta que el dueño pueda hacer esta semana, en una sola frase que empiece con un verbo (ej. "Poner un cartel con el horario en la puerta").
-- "motivo": una frase corta que explique por qué, basada en lo que dicen las reseñas.
-- "prioridad": "alta" si 3 o más reseñas lo mencionan o si baja claramente la calificación; "media" si lo mencionan 2; "baja" si lo menciona solo 1.
-- "respaldo": cuántas de las reseñas de la lista mencionan ese tema (un número entero entre 1 y ${withText.length}).
-- "cita": un fragmento corto (máximo 15 palabras) copiado LITERALMENTE de una reseña que respalde la acción.
-- Si las reseñas son todas positivas y no señalan ningún problema concreto, devolvé "acciones": [] y en "mejorar" decilo claramente. No inventes problemas para llenar la lista.
+Reglas:
+- "fortalezas": hasta ${MAX_STRENGTHS} cosas que los clientes valoran, ordenadas de más a menos mencionadas.
+- "oportunidades": hasta ${MAX_OPPORTUNITIES} problemas o cosas a mejorar. "gravedad" es "alta" si 3 o más reseñas lo mencionan o si baja claramente la calificación, "media" si lo mencionan 2, "baja" si solo 1.
+- "temas": hasta ${MAX_THEMES} temas que aparecen en las reseñas (por ejemplo atención, comida o producto, precio, ambiente, tiempos de espera, limpieza, ubicación). "positivas" y "negativas" son cuántas reseñas hablan bien y mal de ese tema. Solo incluí temas que realmente se mencionan.
+- "acciones": hasta ${MAX_ACTIONS}, de más a menos prioritaria. Cada una tiene: "accion" (una frase concreta que empiece con un verbo y que el dueño pueda ejecutar), "motivo" (por qué, según las reseñas), "prioridad" ("alta", "media" o "baja"), "plazo" (uno de: "esta semana", "este mes", "próximos 3 meses"), "impacto" (qué mejora esperable trae, en una frase, sin prometer números), "pasos" (2 a 4 pasos cortos y prácticos para hacerla).
+- "respaldo": cuántas de las reseñas de la lista mencionan ese tema (un número entero entre 1 y ${reviews.length}).
+- "cita": un fragmento corto (máximo 15 palabras) copiado LITERALMENTE de una reseña que respalde el punto.
+- "respuestas": hasta ${MAX_REPLIES} respuestas listas para publicar, para las reseñas más negativas o mixtas (idealmente de 3 estrellas o menos). "numero" es el número de la reseña de la lista. "respuesta" es lo que el dueño puede contestar públicamente en Google: cordial y profesional, en primera persona, agradece, reconoce el problema puntual sin discutir, ofrece una solución o invita a volver, y no promete nada que no se sepa ni inventa datos. Máximo 60 palabras. Si no hay reseñas negativas o mixtas, devolvé "respuestas": [].
+- Si las reseñas son todas positivas y no señalan ningún problema, devolvé "oportunidades": [] y "acciones": [] y decilo en el "resumen". No inventes problemas para llenar las listas.
 
 Respondé SOLO el JSON, sin texto adicional antes ni después.`
 
@@ -218,7 +392,7 @@ Respondé SOLO el JSON, sin texto adicional antes ni después.`
       for (let attempt = 0; attempt < 2 && !analysis; attempt++) {
         try {
           const text = await provider.run()
-          analysis = parseAnalysis(text, reviewTexts)
+          analysis = parseAnalysis(text, reviews)
           if (analysis) usedProvider = provider.name
           else if (attempt === 1) failures.push(`${provider.name}: respuesta con formato inválido`)
         } catch (err) {
@@ -235,11 +409,29 @@ Respondé SOLO el JSON, sin texto adicional antes ni después.`
 
     const row = {
       business_id,
-      review_count: withText.length,
+      review_count: reviews.length,
       provider: usedProvider,
-      bien: analysis.bien,
-      mejorar: analysis.mejorar,
+      // Kept for the original columns / older UI: short prose versions of the
+      // strengths and opportunities.
+      bien: analysis.fortalezas
+        .slice(0, 2)
+        .map((f) => f.detalle)
+        .join(' '),
+      mejorar: analysis.oportunidades.length
+        ? analysis.oportunidades
+            .slice(0, 2)
+            .map((o) => o.detalle)
+            .join(' ')
+        : 'Las reseñas recientes no señalan ningún problema concreto.',
       acciones: analysis.acciones,
+      detalle: {
+        resumen: analysis.resumen,
+        estadisticas: stats,
+        fortalezas: analysis.fortalezas,
+        oportunidades: analysis.oportunidades,
+        temas: analysis.temas,
+        respuestas: analysis.respuestas,
+      },
     }
 
     // Saving is best-effort: if it fails the user still gets their analysis,
@@ -255,6 +447,7 @@ Respondé SOLO el JSON, sin texto adicional antes ni después.`
         bien: row.bien,
         mejorar: row.mejorar,
         acciones: row.acciones,
+        detalle: row.detalle,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 },
     )

@@ -26,12 +26,67 @@ export interface Business {
   updated_at: string
 }
 
+export type Priority = 'alta' | 'media' | 'baja'
+
 export interface AnalysisAction {
   accion: string
   motivo: string
-  prioridad: 'alta' | 'media' | 'baja'
+  prioridad: Priority
   respaldo: number
   cita: string
+  // Added with the complete analysis — absent on older saved rows.
+  plazo?: 'esta semana' | 'este mes' | 'próximos 3 meses'
+  impacto?: string
+  pasos?: string[]
+}
+
+export interface AnalysisStrength {
+  tema: string
+  detalle: string
+  respaldo: number
+  cita: string
+}
+
+export interface AnalysisOpportunity {
+  tema: string
+  detalle: string
+  gravedad: Priority
+  respaldo: number
+  cita: string
+}
+
+export interface AnalysisTheme {
+  nombre: string
+  positivas: number
+  negativas: number
+}
+
+export interface AnalysisReply {
+  rating: number | null
+  resena: string
+  respuesta: string
+}
+
+export interface AnalysisStats {
+  total: number
+  con_calificacion: number
+  promedio: number | null
+  distribucion: Record<string, number>
+  positivas_pct: number
+  negativas_pct: number
+  tendencia: 'sube' | 'baja' | 'estable' | null
+  promedio_recientes: number | null
+  promedio_anteriores: number | null
+}
+
+/** Everything beyond the original bien/mejorar/acciones. Empty `{}` on analyses saved before the complete version. */
+export interface AnalysisDetail {
+  resumen?: string
+  estadisticas?: AnalysisStats
+  fortalezas?: AnalysisStrength[]
+  oportunidades?: AnalysisOpportunity[]
+  temas?: AnalysisTheme[]
+  respuestas?: AnalysisReply[]
 }
 
 export interface Analysis {
@@ -42,6 +97,7 @@ export interface Analysis {
   bien: string
   mejorar: string
   acciones: AnalysisAction[]
+  detalle?: AnalysisDetail
 }
 
 export interface ReviewSnapshot {
