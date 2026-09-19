@@ -263,7 +263,7 @@ async function callOpenRouter(prompt: string, key: string): Promise<string> {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
     body: JSON.stringify({
       // Free-tier model — no cost, only used when Gemini is unavailable.
-      model: 'meta-llama/llama-3.3-70b-instruct:free',
+      model: 'deepseek/deepseek-v4-flash-0731:free',
       messages: [{ role: 'user', content: prompt }],
     }),
   })
@@ -379,7 +379,7 @@ Respondé SOLO el JSON, sin texto adicional antes ni después.`
     const providers: { name: string; run: () => Promise<string> }[] = []
     if (geminiKey) providers.push({ name: 'gemini-3.6-flash', run: () => callGemini(prompt, geminiKey) })
     if (openRouterKey) {
-      providers.push({ name: 'llama-3.3-70b (openrouter)', run: () => callOpenRouter(prompt, openRouterKey) })
+      providers.push({ name: 'deepseek-v4-flash (openrouter)', run: () => callOpenRouter(prompt, openRouterKey) })
     }
 
     const failures: string[] = []
