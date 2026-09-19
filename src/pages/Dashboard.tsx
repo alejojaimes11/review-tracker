@@ -144,7 +144,7 @@ function BusinessCard({
   const stopTracking = useStopTracking()
   const resumeTracking = useResumeTracking()
   const gained = business.current_reviews - business.initial_reviews
-  const { lowUsage, syncError, ratingDropped } = getBusinessRisk(business)
+  const { lowUsage, syncError, ratingDropped, negativeReview } = getBusinessRisk(business)
   const sparkline = useMemo(() => dailySeries(recentSnapshots, 14), [recentSnapshots])
   const goalProgress = business.monthly_goal
     ? monthlyGained(recentSnapshots, business.current_reviews, monthStart)
@@ -197,7 +197,7 @@ function BusinessCard({
         </div>
       </Link>
 
-      {(lowUsage || ratingDropped || isTopPerformer || syncError) && (
+      {(lowUsage || ratingDropped || isTopPerformer || syncError || negativeReview) && (
         <div className="mb-3 flex flex-wrap gap-1.5">
           {isTopPerformer && (
             <Badge color={GOOD_COLOR} icon="trophy">
@@ -209,6 +209,7 @@ function BusinessCard({
               <Badge color={CRITICAL_COLOR}>Error de sync</Badge>
             </span>
           )}
+          {negativeReview && <Badge color={CRITICAL_COLOR}>Reseña negativa nueva</Badge>}
           {lowUsage && <Badge color={WARNING_COLOR}>Poco uso</Badge>}
           {ratingDropped && <Badge color={CRITICAL_COLOR}>Rating bajó</Badge>}
         </div>
@@ -345,6 +346,7 @@ function RiskSection({ businesses }: { businesses: Business[] }) {
                         <Badge color={CRITICAL_COLOR}>Error de sync</Badge>
                       </span>
                     )}
+                    {risk.negativeReview && <Badge color={CRITICAL_COLOR}>Reseña negativa nueva</Badge>}
                     {risk.ratingDropped && <Badge color={CRITICAL_COLOR}>Rating bajó</Badge>}
                     {risk.lowUsage && <Badge color={WARNING_COLOR}>Poco uso</Badge>}
                     {whatsappLink && (

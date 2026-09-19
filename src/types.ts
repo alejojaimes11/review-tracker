@@ -21,8 +21,27 @@ export interface Business {
   deleted_at: string | null
   notes: string | null
   phone: string | null
+  last_negative_review_at: string | null
   created_at: string
   updated_at: string
+}
+
+export interface AnalysisAction {
+  accion: string
+  motivo: string
+  prioridad: 'alta' | 'media' | 'baja'
+  respaldo: number
+  cita: string
+}
+
+export interface Analysis {
+  id: string
+  created_at: string
+  review_count: number
+  provider: string
+  bien: string
+  mejorar: string
+  acciones: AnalysisAction[]
 }
 
 export interface ReviewSnapshot {

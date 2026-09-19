@@ -19,6 +19,8 @@ export function getCategoryVisual(category: string): { icon: CategoryIcon; color
   return CATEGORY_VISUALS.find((c) => c.match.test(category)) ?? { icon: 'tag', color: '#a78bfa' }
 }
 
+const NEGATIVE_REVIEW_DAYS = 7
+
 export function getBusinessRisk(business: Business) {
   const lowUsage =
     business.status === 'active' &&
@@ -30,7 +32,19 @@ export function getBusinessRisk(business: Business) {
     business.current_rating !== null &&
     business.current_rating < business.initial_rating
 
-  return { lowUsage, syncError, ratingDropped, any: lowUsage || syncError || ratingDropped }
+  // A brand-new 1-2 star review flagged by the sync job stays "recent" for a week.
+  const negativeReview =
+    business.status === 'active' &&
+    business.last_negative_review_at !== null &&
+    daysSince(business.last_negative_review_at) < NEGATIVE_REVIEW_DAYS
+
+  return {
+    lowUsage,
+    syncError,
+    ratingDropped,
+    negativeReview,
+    any: lowUsage || syncError || ratingDropped || negativeReview,
+  }
 }
 
 interface SnapshotLike {
@@ -76,6 +90,9 @@ export function buildWhatsAppReminder(business: Business, risk: ReturnType<typeo
     parts.push(
       `Vimos que no ha entrado ninguna reseña nueva en los últimos ${days} días. ¿La placa sigue visible donde el cliente paga?`,
     )
+  }
+  if (risk.negativeReview) {
+    parts.push('Entró una reseña con calificación baja hace poco — si querés, la miramos juntos y vemos cómo responderla.')
   }
   if (risk.ratingDropped) {
     parts.push('También notamos que el rating bajó un poco — si hay algo en lo que podamos ayudar a mejorar, contanos.')

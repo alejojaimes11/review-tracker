@@ -84,7 +84,29 @@ Deno.serve(async (req) => {
                   text: r.text,
                   published_at: r.publishedAtDate,
                 }))
-                await supabase.from('reviews').upsert(rows, { onConflict: 'review_id', ignoreDuplicates: true })
+                // With ignoreDuplicates, .select() returns only the rows that
+                // were actually inserted — i.e. reviews we hadn't seen before.
+                const { data: inserted } = await supabase
+                  .from('reviews')
+                  .upsert(rows, { onConflict: 'review_id', ignoreDuplicates: true })
+                  .select('rating, published_at')
+
+                // Negative-review alert: a brand-new 1-2 star review that was
+                // also published recently (so an old review that merely
+                // slid into the latest-20 window doesn't trigger it).
+                const recentCutoff = Date.now() - 14 * 86_400_000
+                const hasNewNegative = (inserted ?? []).some(
+                  (r) =>
+                    r.rating !== null &&
+                    r.rating <= 2 &&
+                    (!r.published_at || new Date(r.published_at).getTime() >= recentCutoff),
+                )
+                if (hasNewNegative) {
+                  await supabase
+                    .from('businesses')
+                    .update({ last_negative_review_at: new Date().toISOString() })
+                    .eq('id', business.id)
+                }
               } catch {
                 // swallow — see comment above
               }

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FunctionsHttpError } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
-import type { Business, ReviewSnapshot } from '../types'
+import type { Analysis, Business, ReviewSnapshot } from '../types'
 
 export function useBusinesses() {
   return useQuery({
@@ -233,17 +233,31 @@ export function useMonthlyReports(businessId: string) {
   })
 }
 
-export interface BusinessAnalysis {
-  bien: string
-  mejorar: string
-  recomendacion: string
-  reviewCount: number
+/** Saved AI analyses for a business, newest first — the latest one is shown on load, the rest are history. */
+export function useAnalyses(businessId: string) {
+  return useQuery({
+    queryKey: ['analyses', businessId],
+    queryFn: async (): Promise<Analysis[]> => {
+      const { data, error } = await supabase
+        .from('analyses')
+        .select('*')
+        .eq('business_id', businessId)
+        .order('created_at', { ascending: false })
+        .limit(10)
+      if (error) throw error
+      return (data ?? []) as Analysis[]
+    },
+  })
 }
 
-/** MarketPulse block 1: on-demand AI read of a business's recent reviews. Not persisted anywhere — regenerated on each click. */
+/** On-demand AI read of a business's recent reviews (prioritized actions). The edge function also saves it to `analyses`. */
 export function useAnalyzeBusiness() {
+  const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (businessId: string): Promise<BusinessAnalysis> => {
+    onSuccess: (_analysis, businessId) => {
+      queryClient.invalidateQueries({ queryKey: ['analyses', businessId] })
+    },
+    mutationFn: async (businessId: string): Promise<Analysis> => {
       const { data, error } = await supabase.functions.invoke('analyze-business', {
         body: { business_id: businessId },
       })
@@ -259,7 +273,7 @@ export function useAnalyzeBusiness() {
         throw error
       }
       if (data?.error) throw new Error(data.error)
-      return data as BusinessAnalysis
+      return data as Analysis
     },
   })
 }
