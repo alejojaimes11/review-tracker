@@ -12,6 +12,8 @@ import {
 } from '../api/businesses'
 import { useTheme } from '../hooks/useTheme'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
+import { useIsAdmin } from '../hooks/useAdmin'
+import { supabase } from '../lib/supabase'
 import {
   Badge,
   Button,
@@ -143,6 +145,7 @@ function BusinessCard({
 }) {
   const stopTracking = useStopTracking()
   const resumeTracking = useResumeTracking()
+  const isAdmin = useIsAdmin()
   const gained = business.current_reviews - business.initial_reviews
   const { lowUsage, syncError, ratingDropped, negativeReview } = getBusinessRisk(business)
   const sparkline = useMemo(() => dailySeries(recentSnapshots, 14), [recentSnapshots])
@@ -248,7 +251,7 @@ function BusinessCard({
         <span>desde {formatDate(business.started_at)}</span>
       </div>
 
-      {business.status === 'active' ? (
+      {isAdmin && (business.status === 'active' ? (
         <Button
           variant="secondary"
           onClick={() => stopTracking.mutate(business.id)}
@@ -266,7 +269,7 @@ function BusinessCard({
         >
           Reanudar seguimiento
         </Button>
-      )}
+      ))}
     </Card>
   )
 }
@@ -490,6 +493,7 @@ export default function Dashboard() {
 
   const filtered = sorted?.filter((b) => selectedCategory === null || b.category === selectedCategory)
   const online = useOnlineStatus()
+  const isAdmin = useIsAdmin()
 
   const snapshotsByBusiness = useMemo(() => {
     const map = new Map<string, SnapshotPoint[]>()
@@ -512,7 +516,12 @@ export default function Dashboard() {
         <Logo />
         <div className="flex items-center gap-2">
           <AddBusinessForm />
-          <TrashSection />
+          {isAdmin && <TrashSection />}
+          {isAdmin && (
+            <Button variant="ghost" onClick={() => supabase.auth.signOut()} className="!px-2.5 text-xs">
+              Salir
+            </Button>
+          )}
           <ThemeToggle />
         </div>
       </div>

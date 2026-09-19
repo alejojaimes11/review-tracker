@@ -15,6 +15,7 @@ import { useTheme } from '../hooks/useTheme'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { Button, Card, Delta, FOCUS_RING, Icon, ProgressBar, Skeleton, StarRating } from '../components/ui'
 import { AnalysisView } from '../components/AnalysisView'
+import { useIsAdmin } from '../hooks/useAdmin'
 import { getCategoryVisual, monthlyGained } from '../lib/business'
 import type { Analysis, Business, ReviewSnapshot } from '../types'
 
@@ -627,6 +628,7 @@ export default function BusinessDetail() {
   const { data: business, isLoading: loadingBusiness } = useBusiness(id!)
   const { data: snapshots, isLoading: loadingSnapshots } = useSnapshots(id!)
   const online = useOnlineStatus()
+  const isAdmin = useIsAdmin()
 
   if (loadingBusiness) return <DetailSkeleton />
 
@@ -733,7 +735,7 @@ export default function BusinessDetail() {
       </p>
 
       <div className="my-6 flex flex-wrap gap-2">
-        <SettingsPanel business={business} />
+        {isAdmin && <SettingsPanel business={business} />}
         <MonthlyReports businessId={business.id} businessName={business.name} />
         <HistoryPanel business={business} snapshots={snapshots} loading={loadingSnapshots} />
         <AiInsights businessId={business.id} />
