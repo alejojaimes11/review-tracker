@@ -443,11 +443,13 @@ function AiInsights({ businessId }: { businessId: string }) {
 
   const latest: Analysis | undefined = analyze.data ?? saved.data?.[0]
   const history = (saved.data ?? []).filter((a) => a.id !== latest?.id)
+  // Closed when the page loads (already read); opens on its own when a new analysis is generated.
+  const [open, setOpen] = useState(false)
   const showCard = analyze.isPending || analyze.isError || latest !== undefined
 
   return (
     <div>
-      <Button variant="secondary" onClick={() => analyze.mutate(businessId)} disabled={analyze.isPending}>
+      <Button variant="secondary" onClick={() => analyze.mutate(businessId, { onSuccess: () => setOpen(true) })} disabled={analyze.isPending}>
         <Icon path="sparkle" className="h-4 w-4" />
         {analyze.isPending ? 'Analizando…' : latest ? 'Analizar de nuevo' : 'Analizar con IA'}
       </Button>
@@ -460,7 +462,16 @@ function AiInsights({ businessId }: { businessId: string }) {
           {analyze.isError && (
             <p className="text-sm text-red-600 dark:text-red-400">{(analyze.error as Error).message}</p>
           )}
-          {latest && !analyze.isPending && <AnalysisView analysis={latest} />}
+          {latest && !analyze.isPending && (
+            <details open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
+              <summary className={`cursor-pointer rounded text-sm font-medium text-gray-700 dark:text-gray-300 ${FOCUS_RING}`}>
+                Último análisis · {formatDateTime(latest.created_at)} {open ? '(tocá para cerrar)' : '(tocá para abrir)'}
+              </summary>
+              <div className="mt-3">
+                <AnalysisView analysis={latest} />
+              </div>
+            </details>
+          )}
 
           {history.length > 0 && !analyze.isPending && (
             <details className="mt-4 border-t border-black/5 pt-3 dark:border-white/10">
