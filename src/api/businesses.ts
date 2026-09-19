@@ -3,6 +3,9 @@ import { FunctionsHttpError } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import type { Analysis, Business, ReviewSnapshot } from '../types'
 
+/** Edge Functions are public by design and always get the anon key, so a logged-in admin session token can't get them rejected. */
+const FUNCTION_HEADERS = { Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` }
+
 export function useBusinesses() {
   return useQuery({
     queryKey: ['businesses'],
@@ -65,6 +68,7 @@ export function useAddBusiness() {
     mutationFn: async (input: string) => {
       const { data, error } = await supabase.functions.invoke('add-business', {
         body: { input },
+        headers: FUNCTION_HEADERS,
       })
       if (error) throw error
       if (data?.error) throw new Error(data.error)
@@ -260,6 +264,7 @@ export function useAnalyzeBusiness() {
     mutationFn: async (businessId: string): Promise<Analysis> => {
       const { data, error } = await supabase.functions.invoke('analyze-business', {
         body: { business_id: businessId },
+        headers: FUNCTION_HEADERS,
       })
       if (error) {
         // supabase-js collapses a non-2xx response into a generic
@@ -267,8 +272,9 @@ export function useAnalyzeBusiness() {
         // actual { error: "..." } body (e.g. "GEMINI_API_KEY no está
         // configurada.") lives in error.context, the raw Response.
         if (error instanceof FunctionsHttpError) {
+          const status = error.context.status
           const body = await error.context.json().catch(() => null)
-          throw new Error(body?.error ?? error.message)
+          throw new Error(body?.error ?? body?.message ?? body?.msg ?? `${error.message} (${status})`)
         }
         throw error
       }
