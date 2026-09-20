@@ -150,12 +150,12 @@ export function PushToggle() {
     const ua = navigator.userAgent
     const isApple = /iPhone|iPad|iPod/.test(ua) || (ua.includes('Mac') && navigator.maxTouchPoints > 1)
     return (
-      <div className="relative">
-        <Button variant="secondary" onClick={() => setOpen((v) => !v)} className="!px-2.5 text-xs">
-          🔕 Notificaciones no disponibles
+      <div className="sm:relative">
+        <Button variant="secondary" onClick={() => setOpen((v) => !v)} className="!px-2.5 text-xs whitespace-nowrap">
+          🔕 No disponibles
         </Button>
         {open && (
-          <Card className="absolute right-0 top-full z-10 mt-2 w-72 !bg-white dark:!bg-[#14141c] p-3 text-sm text-gray-700 shadow-lg dark:text-gray-300">
+          <Card className="absolute inset-x-0 top-full z-10 mt-2 !bg-white dark:!bg-[#14141c] sm:inset-x-auto sm:right-0 sm:w-72 p-3 text-sm text-gray-700 shadow-lg dark:text-gray-300">
             {!VAPID_PUBLIC_KEY
               ? 'Falta la clave de notificaciones en esta versión de la app.'
               : isApple
@@ -167,16 +167,17 @@ export function PushToggle() {
     )
   }
 
-  const label =
+  // Long text on wide screens, a short one on phones so the header row fits.
+  const [longLabel, shortLabel] =
     state === 'on'
-      ? '🔔 Notificaciones activadas'
+      ? ['🔔 Notificaciones activadas', '🔔 Activadas']
       : state === 'denied'
-        ? '🔕 Notificaciones bloqueadas'
+        ? ['🔕 Notificaciones bloqueadas', '🔕 Bloqueadas']
         : state === 'error'
-          ? '⚠️ Notificaciones: error'
+          ? ['⚠️ Notificaciones: error', '⚠️ Error']
           : permission === 'granted'
-            ? '🔔 Permiso concedido · Activar'
-            : '🔔 Activar notificaciones'
+            ? ['🔔 Permiso concedido · Activar', '🔔 Activar']
+            : ['🔔 Activar notificaciones', '🔔 Activar']
 
   function handleClick() {
     if (state === 'off') void activate()
@@ -184,13 +185,20 @@ export function PushToggle() {
   }
 
   return (
-    <div className="relative">
-      <Button variant="secondary" onClick={handleClick} disabled={state === 'busy'} className="!px-2.5 text-xs">
-        {state === 'busy' ? 'Un momento…' : label}
+    <div className="sm:relative">
+      <Button variant="secondary" onClick={handleClick} disabled={state === 'busy'} className="!px-2.5 text-xs whitespace-nowrap">
+        {state === 'busy' ? (
+          'Un momento…'
+        ) : (
+          <>
+            <span className="sm:hidden">{shortLabel}</span>
+            <span className="hidden sm:inline">{longLabel}</span>
+          </>
+        )}
       </Button>
 
       {open && state !== 'busy' && (
-        <Card className="absolute right-0 top-full z-10 mt-2 w-72 !bg-white dark:!bg-[#14141c] p-3 text-sm shadow-lg">
+        <Card className="absolute inset-x-0 top-full z-10 mt-2 !bg-white dark:!bg-[#14141c] sm:inset-x-auto sm:right-0 sm:w-72 p-3 text-sm shadow-lg">
           {state === 'denied' && (
             <p className="text-gray-700 dark:text-gray-300">
               El navegador bloqueó las notificaciones. Habilitalas en la configuración del sitio y recargá.

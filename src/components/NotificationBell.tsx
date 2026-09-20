@@ -29,7 +29,7 @@ export function NotificationBell() {
   }
 
   return (
-    <div className="relative">
+    <div className="sm:relative">
       <Button
         variant="secondary"
         onClick={() => setOpen((v) => !v)}
@@ -45,7 +45,7 @@ export function NotificationBell() {
       </Button>
 
       {open && (
-        <Card className="absolute right-0 top-full z-20 mt-2 w-80 max-w-[calc(100vw-2rem)] !bg-white p-2 shadow-lg dark:!bg-[#14141c]">
+        <Card className="absolute inset-x-0 top-full z-20 mt-2 !bg-white p-2 shadow-lg dark:!bg-[#14141c] sm:inset-x-auto sm:right-0 sm:w-80">
           <div className="flex items-center justify-between px-2 pb-2 pt-1">
             <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Notificaciones</span>
             {unread.length > 0 && (

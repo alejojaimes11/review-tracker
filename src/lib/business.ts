@@ -43,7 +43,9 @@ export function getBusinessRisk(business: Business) {
     syncError,
     ratingDropped,
     negativeReview,
-    any: lowUsage || syncError || ratingDropped || negativeReview,
+    // syncError is deliberately not a visible risk: it is an internal signal that
+    // feeds the Notification Engine (push to the admin), not something shown on cards.
+    any: lowUsage || ratingDropped || negativeReview,
   }
 }
 

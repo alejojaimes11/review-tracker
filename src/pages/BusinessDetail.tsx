@@ -699,13 +699,6 @@ export default function BusinessDetail() {
         </div>
       </div>
 
-      {business.last_sync_error && (
-        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
-          <span className="font-medium">Error de sincronización: </span>
-          {business.last_sync_error}
-        </div>
-      )}
-
       <div className="my-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Card className="col-span-2 flex flex-col items-center justify-center p-6 sm:order-first">
           <p className="text-4xl font-bold tabular-nums">

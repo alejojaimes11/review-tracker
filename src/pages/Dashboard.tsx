@@ -105,18 +105,18 @@ function AddBusinessForm() {
       {addedName && <Toast message={`"${addedName}" agregado correctamente`} onDismiss={() => setAddedName(null)} />}
 
       {!open ? (
-        <Button onClick={() => setOpen(true)}>
+        <Button onClick={() => setOpen(true)} className="whitespace-nowrap">
           <span className="text-base leading-none">+</span> Agregar negocio
         </Button>
       ) : (
-        <form onSubmit={handleSubmit} className="flex items-start gap-2">
-          <div className="flex flex-col gap-1">
+        <form onSubmit={handleSubmit} className="flex w-full flex-wrap items-start gap-2 sm:w-auto sm:flex-nowrap">
+          <div className="flex w-full flex-col gap-1 sm:w-auto">
             <input
               autoFocus
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="URL de Google Maps o nombre del negocio + ciudad"
-              className="w-80 rounded-lg border border-black/10 bg-white/80 px-3 py-2 text-sm text-zinc-900 outline-none transition-colors focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 dark:border-white/10 dark:bg-white/[0.06] dark:text-zinc-100"
+              className="w-full rounded-lg border border-black/10 sm:w-80 bg-white/80 px-3 py-2 text-sm text-zinc-900 outline-none transition-colors focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 dark:border-white/10 dark:bg-white/[0.06] dark:text-zinc-100"
             />
             {addBusiness.isError && (
               <span className="text-xs text-red-600 dark:text-red-400">{(addBusiness.error as Error).message}</span>
@@ -149,7 +149,7 @@ function BusinessCard({
   const resumeTracking = useResumeTracking()
   const isAdmin = useIsAdmin()
   const gained = business.current_reviews - business.initial_reviews
-  const { lowUsage, syncError, ratingDropped, negativeReview } = getBusinessRisk(business)
+  const { lowUsage, ratingDropped, negativeReview } = getBusinessRisk(business)
   const sparkline = useMemo(() => dailySeries(recentSnapshots, 14), [recentSnapshots])
   const goalProgress = business.monthly_goal
     ? monthlyGained(recentSnapshots, business.current_reviews, monthStart)
@@ -202,17 +202,12 @@ function BusinessCard({
         </div>
       </Link>
 
-      {(lowUsage || ratingDropped || isTopPerformer || syncError || negativeReview) && (
+      {(lowUsage || ratingDropped || isTopPerformer || negativeReview) && (
         <div className="mb-3 flex flex-wrap gap-1.5">
           {isTopPerformer && (
             <Badge color={GOOD_COLOR} icon="trophy">
               Mejor desempeño
             </Badge>
-          )}
-          {syncError && (
-            <span title={business.last_sync_error ?? undefined}>
-              <Badge color={CRITICAL_COLOR}>Error de sync</Badge>
-            </span>
           )}
           {negativeReview && <Badge color={CRITICAL_COLOR}>Reseña negativa nueva</Badge>}
           {lowUsage && <Badge color={WARNING_COLOR}>Poco uso</Badge>}
@@ -346,11 +341,6 @@ function RiskSection({ businesses }: { businesses: Business[] }) {
                     {b.name}
                   </Link>
                   <span className="flex flex-wrap items-center gap-1.5">
-                    {risk.syncError && (
-                      <span title={b.last_sync_error ?? undefined}>
-                        <Badge color={CRITICAL_COLOR}>Error de sync</Badge>
-                      </span>
-                    )}
                     {risk.negativeReview && <Badge color={CRITICAL_COLOR}>Reseña negativa nueva</Badge>}
                     {risk.ratingDropped && <Badge color={CRITICAL_COLOR}>Rating bajó</Badge>}
                     {risk.lowUsage && <Badge color={WARNING_COLOR}>Poco uso</Badge>}
@@ -384,14 +374,14 @@ function TrashSection() {
   if (!trashed || trashed.length === 0) return null
 
   return (
-    <div className="relative">
-      <Button variant="secondary" onClick={() => setOpen((v) => !v)} className="!px-2.5">
+    <div className="sm:relative">
+      <Button variant="secondary" onClick={() => setOpen((v) => !v)} className="!px-2.5 whitespace-nowrap">
         <Icon path="trash" className="h-4 w-4" filled={false} />
         Papelera ({trashed.length})
       </Button>
 
       {open && (
-        <Card className="absolute right-0 top-full z-10 mt-2 w-72 p-3 shadow-lg">
+        <Card className="absolute inset-x-0 top-full z-10 mt-2 !bg-white p-3 shadow-lg dark:!bg-[#14141c] sm:inset-x-auto sm:right-0 sm:w-72">
           <ul className="space-y-2">
             {trashed.map((b) => (
               <li key={b.id} className="flex items-center justify-between gap-2 text-sm">
@@ -516,13 +506,15 @@ export default function Dashboard() {
     <div className="mx-auto max-w-5xl px-6 py-10">
       <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
         <Logo />
-        <div className="flex items-center gap-2">
+        {/* On phones the actions take their own full-width row and wrap; the
+            popovers inside anchor to this row (relative) instead of to one button. */}
+        <div className="relative flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
           <AddBusinessForm />
           {isAdmin && <NotificationBell />}
           {isAdmin && <PushToggle />}
           {isAdmin && <TrashSection />}
           {isAdmin && (
-            <Button variant="ghost" onClick={() => supabase.auth.signOut()} className="!px-2.5 text-xs">
+            <Button variant="ghost" onClick={() => supabase.auth.signOut()} className="!px-2.5 text-xs whitespace-nowrap">
               Salir
             </Button>
           )}
