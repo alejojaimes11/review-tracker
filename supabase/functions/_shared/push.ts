@@ -11,6 +11,8 @@ export interface PushPayload {
   body: string
   /** Where the notification click should open, relative to the app origin. */
   url?: string
+  /** Notifications sharing a tag replace each other on the device, so a resend never shows twice. */
+  tag?: string
 }
 
 export type PushResult =

@@ -155,7 +155,7 @@ export function PushToggle() {
           🔕 Notificaciones no disponibles
         </Button>
         {open && (
-          <Card className="absolute right-0 top-full z-10 mt-2 w-72 p-3 text-sm text-gray-700 shadow-lg dark:text-gray-300">
+          <Card className="absolute right-0 top-full z-10 mt-2 w-72 !bg-white dark:!bg-[#14141c] p-3 text-sm text-gray-700 shadow-lg dark:text-gray-300">
             {!VAPID_PUBLIC_KEY
               ? 'Falta la clave de notificaciones en esta versión de la app.'
               : isApple
@@ -190,7 +190,7 @@ export function PushToggle() {
       </Button>
 
       {open && state !== 'busy' && (
-        <Card className="absolute right-0 top-full z-10 mt-2 w-72 p-3 text-sm shadow-lg">
+        <Card className="absolute right-0 top-full z-10 mt-2 w-72 !bg-white dark:!bg-[#14141c] p-3 text-sm shadow-lg">
           {state === 'denied' && (
             <p className="text-gray-700 dark:text-gray-300">
               El navegador bloqueó las notificaciones. Habilitalas en la configuración del sitio y recargá.

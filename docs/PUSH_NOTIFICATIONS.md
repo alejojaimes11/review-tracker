@@ -1,7 +1,8 @@
 # Push notifications (Web Push)
 
-Estado: **Fase 1 — solo infraestructura para admin.** No hay eventos de reseñas, motor de notificaciones,
-notificaciones a clientes, hitos, inactividad ni mensajes manuales todavía.
+Estado: **Fase 1 (infraestructura push para admin) y Fase 2 (eventos + Notification Engine para admin) terminadas.**
+Todavía no hay notificaciones a clientes/negocios, mensajes manuales, hitos, inactividad ni recordatorios (Fase 3).
+La Fase 1 se describe primero; la Fase 2 empieza en "Fase 2 — Notification Engine (admin)".
 
 ## Arquitectura
 
@@ -86,3 +87,137 @@ Producción (manual):
 4. Clic en la notificación → abre Review Tracker.
 5. Repetir activar/desactivar: sigue habiendo una sola fila por dispositivo.
 6. Sin sesión de admin, `send-test-push` y `register-push` responden 403.
+
+---
+
+# Fase 2 — Notification Engine (admin)
+
+```
+sync-businesses ──► review_snapshots (ya existía, solo se agrega)
+      │
+      ├─ emit_review_gained_events()  ──►  notification_events   (hechos, event_key único)
+      └─ recordSyncFailure()          ──►  notification_events
+
+cron independiente cada 15 min ──► notification-engine
+      1. barrido de seguridad: emit_review_gained_events (últimas 24 h)
+      2. reglas: eventos ──► notifications           (engine_commit: 1 transacción)
+      3. envío: notifications pendientes y vencidas ──► Web Push ──► notification_deliveries
+```
+
+`sync-businesses` **nunca envía push**: solo escribe hechos. Un fallo del motor no afecta al sync y viceversa.
+
+## Tablas (migración `0021_notification_engine.sql`)
+
+| Tabla | Qué guarda | Acceso |
+|---|---|---|
+| `notification_events` | Hechos: `event_key` (único), `event_type`, `business_id`, `payload`, `occurred_at`, `processed_at`, `notification_id`, `skipped_reason`. | Solo `service_role`. |
+| `notifications` | Mensaje concreto: `recipient_user_id`, `type`, `title`, `body`, `data`, `status` (pending/sent/failed), `scheduled_for`, `sent_at`, `read_at`, `attempt_count`, `last_error`. Genérica: sirve para cualquier tipo. | El usuario **lee solo las suyas y ya vencidas**, y solo puede cambiar `read_at`. Sin insert ni delete. |
+| `notification_deliveries` | Un intento por (notificación, dispositivo): estado, intentos, `delivered_at`, `error_code`, `error_message`. Único por `(notification_id, push_subscription_id)`. | Solo `service_role`. |
+| `notification_engine_state` | `events_from`: instante de lanzamiento. Nada anterior genera eventos (evita una ráfaga con el historial). | Solo `service_role`. |
+
+Funciones SQL (solo `service_role`, `search_path` fijado en la migración 0023):
+`emit_review_gained_events(p_since)` y `engine_commit(...)`.
+
+## Eventos
+
+- **`reviews_gained`** — se deriva de `review_snapshots`, que es de solo agregar (a diferencia de `businesses.current_reviews`, que el
+  sync sobrescribe). Cada snapshot se compara con el snapshot anterior del mismo negocio; **solo un aumento** crea evento.
+  `100 → 95` no crea nada; después `95 → 97` crea `gained = 2`. Clave: `reviews_gained:{business_id}:{snapshot_id}`.
+  Payload: `previous_count`, `new_count`, `gained`, `snapshot_id`.
+- **`sync_failed`** — lo escribe `sync-businesses` cuando falla un negocio (`business_id` = ese negocio) o el sync completo
+  (`business_id` = null). Clave: `sync_failed:{business_id|global}:{hora}`. El error de un negocio no detiene el lote
+  (`Promise.allSettled`, sin cambios). Como `pg_cron + net.http_post` es asíncrono y no refleja un HTTP 400/500, el propio sync
+  registra el evento antes de responder.
+
+## Reglas y agrupación (`_shared/notification-rules.ts`)
+
+Cada regla = eventos → items → (fusión con lo ya pendiente) → título/cuerpo/`data`. Agregar un tipo nuevo es agregar una entrada a `RULES`.
+
+- **`reviews_activity`** (de `reviews_gained`): **una sola notificación por ciclo**.
+  - 1 negocio: `🔔 Valejo Kids recibió 2 nuevas reseñas ⭐` → clic abre `/business/{id}`.
+  - 2 a 5 negocios: título `🔔 Nueva actividad en Review Tracker` y una línea por negocio, de mayor a menor → clic abre `/`.
+  - Más de 5: resumen `N negocios recibieron nuevas reseñas. Total: X nuevas reseñas ⭐`.
+  - Los negocios con +0 no aparecen. `data` guarda `items`, `business_ids`, `total` y `url`.
+- **`sync_failed`**: `⚠️ Error de sincronización`. Un negocio: `No se pudo actualizar X.`; varios: se listan hasta 5 y `y N más`.
+  Un mismo negocio solo alerta una vez cada 24 h (`SYNC_FAILED_COOLDOWN_HOURS`), para no repetir cada ciclo.
+
+Un evento sin regla se marca procesado con `skipped_reason = 'no_rule'`; los que una regla descarta llevan su motivo.
+
+## Idempotencia y reintentos
+
+| Situación | Cómo se evita el duplicado o la pérdida |
+|---|---|
+| Se repite el sync / el cron / el barrido | El evento tiene clave única (`on conflict do nothing`). |
+| El sync guardó snapshots y cayó antes de emitir eventos | El motor repite `emit_review_gained_events` (24 h atrás). No se pierde nada. |
+| Dos ejecuciones del motor toman los mismos eventos | `engine_commit` bloquea las filas y devuelve `null` a la segunda. |
+| El motor cae **después** de crear la notificación | Los eventos ya quedaron ligados (misma transacción). La notificación sigue `pending` y el siguiente ciclo solo la envía. |
+| Se reintenta el envío | Se salta cada dispositivo con entrega `sent`; el push lleva `tag: n-{id}`, así un reenvío reemplaza en el dispositivo en vez de mostrarse doble. Se reintentan solo errores temporales (sin respuesta, 429, 5xx), hasta 3 intentos. |
+
+Un dispositivo con 404/410 se desactiva (`enabled = false`) y **solo ese**; su historial de entregas se conserva. Tras 5 fallos seguidos también se desactiva.
+Si no hay dispositivos activos, la notificación queda `failed` con `last_error = 'no_active_subscriptions'` (igual se ve en la campana).
+
+## Horas de silencio (`_shared/quiet-hours.ts`)
+
+`America/Bogota`, 22:00–07:00. Una notificación creada en ese intervalo **se crea igual** pero con `scheduled_for` = las 07:00 siguientes;
+el motor solo envía las que ya vencieron. Mientras esté pendiente y sin tocar, nueva actividad de ese tipo **se fusiona** en ella, para que a las
+07:00 llegue un solo aviso. La campana tampoco muestra lo que aún no venció (lo garantiza la política RLS). `scheduled_for` es genérico y
+lo reutilizarán otros tipos.
+
+## Edge Functions
+
+- **`notification-engine`** — `verify_jwt = true` y además comprueba que quien llama pueda leer una tabla exclusiva de `service_role`
+  (funciona con cualquier formato de clave). Con la clave pública, sin cabecera o con token falso: 401. No hace scraping, no llama a Apify,
+  no toca `current_reviews`.
+- **`sync-businesses`** — cambio aditivo (42 líneas, ninguna existente modificada): `recordSyncFailure()` y una llamada final a
+  `emit_review_gained_events`, ambas dentro de `try/catch` que se tragan sus errores.
+
+## Cron (migración `0022_notification_engine_cron.sql`)
+
+`notification-engine-every-15m` (`*/15 * * * *`), con la clave de Vault, igual que el sync. Espera 3 minutos tras crearse un evento
+(`SETTLE_MINUTES`) para que un sync en curso termine y un mismo ciclo caiga en la misma notificación.
+
+## Frontend
+
+`NotificationBell` (solo admin, junto a `PushToggle`): contador de no leídas, últimas 30 notificaciones, título, mensaje, hora relativa y
+leída/sin leer. Clic: marca como leída y navega a `data.url`. "Marcar todas como leídas". Lee `notifications` directo con RLS (refresco cada 60 s).
+
+## Cambios a la Fase 1 (los únicos)
+
+1. `_shared/push.ts`: campo opcional `tag` en `PushPayload`. Necesario para que un reenvío reemplace la notificación en el dispositivo.
+   `push-sw.js` ya soportaba `tag`, así que no se tocó.
+2. `PushToggle.tsx`: solo clases de fondo opaco en sus dos paneles flotantes (eran translúcidos y el texto de abajo se mezclaba).
+
+No se tocaron `push-sw.js`, VAPID, `register-push`, `send-test-push` ni la configuración PWA.
+
+## Decisiones
+
+- **Rutas de clic:** el pedido mencionaba `/admin/business/{id}` y `/admin`, pero esas rutas no existen (`/admin` es el login).
+  Se usan `/business/{id}` y `/`.
+- **Varios admins:** las notificaciones se crean por admin, pero los eventos los consume el primero. Con un solo admin no hay diferencia;
+  si hay más, una interrupción entre admins podría dejar a uno sin aviso. Se revisa en la Fase 3 al definir destinatarios.
+- **Entrega "aceptada" ≠ "vista":** `delivered_at` significa que el servicio push aceptó el mensaje; el dispositivo no lo confirma.
+- Al hacer clic en la notificación del sistema no se marca como leída (el service worker no tiene la sesión); se marca al abrirla en la campana.
+
+## QA realizado
+
+Datos: con transacciones que se revierten (casos 1 a 6). Envío real: negocios de prueba "🧪 QA …", borrados al terminar.
+
+| Caso | Resultado |
+|---|---|
+| 1. 100 → 102 | 1 evento (`gained: 2`) |
+| 2. Valejo +2, Granja +7, Go Market +1 | 3 eventos → **1** notificación agrupada, sin negocios en +0 |
+| 3. Sin crecimiento | 0 eventos, 0 notificaciones |
+| 4. 100 → 95; luego 95 → 97 | 0 eventos; luego `gained: 2`, `previous_count: 95` |
+| 5. Reintentos (sync, barrido, cron, snapshot repetido) | 0 eventos nuevos, 0 claves duplicadas |
+| 6. Motor cae tras crear la notificación | Notificación pendiente enviada una sola vez a cada dispositivo; no se crea otra |
+| 7. Dos dispositivos (Chrome/FCM + iPhone/Apple) | Ambos aceptados por su servicio push, para cada notificación |
+| 8. Suscripción que responde 410 | Se desactiva solo esa; las reales siguen activas; historial intacto |
+| 9. Silencio | `scheduled_for` a futuro: 0 entregas hasta vencer; al vencer, se envía |
+| 10. Fallo de sync | 7 negocios reales + 1 de prueba fallaron (Apify sin crédito, 402): 8 eventos con clave propia, el sync respondió 200 y recorrió todo el lote |
+| Extra: error temporal (503) | Se reintenta solo el dispositivo con error; los demás no reciben el aviso otra vez; a los 3 intentos se cierra |
+| Extra: seguridad | `anon` denegado en todas las tablas nuevas y en las dos funciones SQL; otro usuario no ve ni marca notificaciones ajenas; el admin solo puede cambiar `read_at` |
+
+Pruebas automáticas: `deno test supabase/functions/_shared/notification-rules_test.ts` (10 pruebas: horas de silencio, formato, fusión,
+reglas). Ejecutarlas desde un directorio sin `package.json`.
+
+Pendiente de comprobar por una persona: que la notificación **aparezca físicamente** en el iPhone y en el PC (el servicio push la aceptó en ambos).

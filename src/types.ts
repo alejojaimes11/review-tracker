@@ -107,3 +107,16 @@ export interface ReviewSnapshot {
   rating: number | null
   created_at: string
 }
+
+/** A row of `notifications` as the admin's browser sees it (RLS: own, already due). */
+export interface AppNotification {
+  id: string
+  type: string
+  title: string
+  body: string
+  /** `url` is where a click goes; the rest depends on `type`. */
+  data: { url?: string } & Record<string, unknown>
+  status: 'pending' | 'sent' | 'failed'
+  created_at: string
+  read_at: string | null
+}

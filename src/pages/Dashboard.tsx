@@ -14,6 +14,7 @@ import { useTheme } from '../hooks/useTheme'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { useIsAdmin } from '../hooks/useAdmin'
 import { PushToggle } from '../components/PushToggle'
+import { NotificationBell } from '../components/NotificationBell'
 import { supabase } from '../lib/supabase'
 import {
   Badge,
@@ -517,6 +518,7 @@ export default function Dashboard() {
         <Logo />
         <div className="flex items-center gap-2">
           <AddBusinessForm />
+          {isAdmin && <NotificationBell />}
           {isAdmin && <PushToggle />}
           {isAdmin && <TrashSection />}
           {isAdmin && (

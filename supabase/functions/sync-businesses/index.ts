@@ -2,10 +2,39 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 import { corsHeaders } from '../_shared/cors.ts'
 import { getReviewStats } from '../_shared/apify.ts'
 
+/**
+ * Notification Engine hook: the sync only records FACTS (notification_events);
+ * it never sends anything. Deliberately swallows its own errors — alerting
+ * must never be able to break or slow down the sync. The key is per business
+ * and per hour, so a retry within the same cycle lands on the same row.
+ */
+async function recordSyncFailure(businessId: string | null, message: string, runBucket: string) {
+  try {
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    )
+    await supabase.from('notification_events').upsert(
+      {
+        event_key: `sync_failed:${businessId ?? 'global'}:${runBucket}`,
+        event_type: 'sync_failed',
+        business_id: businessId,
+        payload: { error: message.slice(0, 500), scope: businessId ? 'business' : 'global' },
+      },
+      { onConflict: 'event_key', ignoreDuplicates: true },
+    )
+  } catch {
+    // swallow — see comment above
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
+
+  const startedAt = Date.now()
+  const runBucket = new Date(startedAt).toISOString().slice(0, 13) // e.g. 2026-09-20T05
 
   try {
     const apiToken = Deno.env.get('APIFY_API_TOKEN')
@@ -120,6 +149,7 @@ Deno.serve(async (req) => {
               .from('businesses')
               .update({ last_sync_error: message, updated_at: new Date().toISOString() })
               .eq('id', business.id)
+            await recordSyncFailure(business.id, message, runBucket)
             throw err
           }
         }),
@@ -134,12 +164,24 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Notification Engine: derive `reviews_gained` events from the snapshots
+    // saved above (idempotent — see emit_review_gained_events). The engine
+    // also re-runs this on its own cron, so a failure here loses nothing.
+    try {
+      await supabase.rpc('emit_review_gained_events', { p_since: new Date(startedAt - 60_000).toISOString() })
+    } catch {
+      // swallow
+    }
+
     return new Response(JSON.stringify({ checked: businesses?.length ?? 0, synced, errors }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Error desconocido'
+    // The whole sync failed (not one business): leave a trace before answering,
+    // since pg_cron won't surface this HTTP 400 as a failure.
+    await recordSyncFailure(null, message, runBucket)
     return new Response(JSON.stringify({ error: message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 400,
