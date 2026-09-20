@@ -13,6 +13,7 @@ import {
 import { useTheme } from '../hooks/useTheme'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { useIsAdmin } from '../hooks/useAdmin'
+import { PushToggle } from '../components/PushToggle'
 import { supabase } from '../lib/supabase'
 import {
   Badge,
@@ -516,6 +517,7 @@ export default function Dashboard() {
         <Logo />
         <div className="flex items-center gap-2">
           <AddBusinessForm />
+          {isAdmin && <PushToggle />}
           {isAdmin && <TrashSection />}
           {isAdmin && (
             <Button variant="ghost" onClick={() => supabase.auth.signOut()} className="!px-2.5 text-xs">
@@ -561,6 +563,15 @@ export default function Dashboard() {
             ))}
           </div>
         </>
+      )}
+
+      {/* An installed app has no address bar, so /admin can't be typed there. */}
+      {!isAdmin && (
+        <p className="mt-10 text-center text-xs">
+          <Link to="/admin" className={`rounded text-gray-400 dark:text-gray-500 ${FOCUS_RING}`}>
+            Acceso admin
+          </Link>
+        </p>
       )}
     </div>
   )

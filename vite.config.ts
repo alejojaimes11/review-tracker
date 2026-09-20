@@ -40,6 +40,9 @@ export default defineConfig(({ mode }) => {
           ],
         },
         workbox: {
+          // Push handlers live in public/push-sw.js and are pulled into the
+          // generated worker, so caching below is untouched.
+          importScripts: ['/push-sw.js'],
           // Lets the last-known dashboard/detail data show up when there's
           // no internet — the service worker always tries the network
           // first (so it's never stale while online) and falls back to
