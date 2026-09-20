@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2'
 import { corsHeaders } from '../_shared/cors.ts'
+import { callerIsBackend } from '../_shared/backend-auth.ts'
 import { sendPush } from '../_shared/push.ts'
 import { nextSendTime } from '../_shared/quiet-hours.ts'
 import { type EngineEvent, RULES, SYNC_FAILED_COOLDOWN_HOURS } from '../_shared/notification-rules.ts'
@@ -13,8 +14,13 @@ import { type EngineEvent, RULES, SYNC_FAILED_COOLDOWN_HOURS } from '../_shared/
 //   * events -> notification is one transaction (engine_commit): an event is
 //     consumed exactly once, and a crash after it just leaves a pending
 //     notification for the delivery step to pick up;
+//   * delivery first CLAIMS each notification (claim_due_notifications, a lease
+//     with a fencing token), so only one run can send it at a time — two
+//     overlapping runs, a manual call or a retry cannot both push it;
 //   * delivery skips devices that already got the notification, and the push
-//     carries a tag so even a resend replaces rather than duplicates.
+//     carries a tag as a last line of defence for the one case a claim can't
+//     cover (a run that dies after the push was accepted but before it was
+//     recorded).
 
 // Wait this long after an event appears so a sync still in flight finishes and
 // one cycle's businesses land in the same grouped notification.
@@ -23,21 +29,16 @@ const MAX_EVENTS_PER_RUN = 500
 const MAX_DUE_NOTIFICATIONS = 50
 const MAX_DELIVERY_ATTEMPTS = 3
 const MAX_DEVICE_FAILURES = 5
+// A run "owns" a notification for this long (renewed before each send). If the
+// run dies or times out, the claim expires and a later run takes over. It must
+// stay longer than the slowest run and shorter than the 15 min cron interval.
+const CLAIM_LEASE_SECONDS = 300
 // Safety net: re-derive reviews_gained from snapshots for this long back, in
 // case a sync saved snapshots and then died before emitting its events.
 const SWEEP_WINDOW_HOURS = 24
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status })
-
-/** Backend-only: the caller must hold a key that can read a service_role-only table. Works for any key format. */
-async function callerIsBackend(req: Request): Promise<boolean> {
-  const token = req.headers.get('Authorization')?.replace(/^Bearer\s+/i, '')
-  if (!token) return false
-  const probe = createClient(Deno.env.get('SUPABASE_URL')!, token, { auth: { persistSession: false } })
-  const { error } = await probe.from('admin_users').select('user_id').limit(1)
-  return !error
-}
 
 // ---------------------------------------------------------------------------
 // Step 1 — events -> notifications
@@ -119,6 +120,7 @@ async function createNotifications(supabase: SupabaseClient, admins: string[]) {
         .eq('type', rule.type)
         .eq('status', 'pending')
         .eq('attempt_count', 0)
+        .is('claimed_at', null)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
@@ -158,21 +160,57 @@ interface Delivery {
   attempt_count: number
 }
 
-async function deliverDue(supabase: SupabaseClient) {
-  const summary = { due: 0, sent: 0, failed: 0, still_pending: 0, pushes_ok: 0, pushes_failed: 0, devices_disabled: 0 }
+interface ClaimedNotification {
+  id: string
+  recipient_user_id: string
+  title: string
+  body: string
+  // deno-lint-ignore no-explicit-any
+  data: any
+  attempt_count: number
+  claim_token: string
+}
 
-  const { data: due, error } = await supabase
+/** Extends our lease, but only while we still hold the claim. False = another run owns it now. */
+async function renewClaim(supabase: SupabaseClient, n: ClaimedNotification): Promise<boolean> {
+  const { data } = await supabase
     .from('notifications')
-    .select('id, recipient_user_id, title, body, data, attempt_count')
+    .update({ claimed_at: new Date().toISOString() })
+    .eq('id', n.id)
+    .eq('claim_token', n.claim_token)
     .eq('status', 'pending')
-    .lte('scheduled_for', new Date().toISOString())
-    .order('scheduled_for', { ascending: true })
-    .limit(MAX_DUE_NOTIFICATIONS)
-  if (error) throw new Error(error.message)
-  summary.due = due?.length ?? 0
+    .select('id')
+  return (data?.length ?? 0) === 1
+}
 
-  for (const n of due ?? []) {
+async function deliverDue(supabase: SupabaseClient) {
+  const summary = {
+    claimed: 0,
+    sent: 0,
+    failed: 0,
+    still_pending: 0,
+    lost_claim: 0,
+    pushes_ok: 0,
+    pushes_failed: 0,
+    devices_disabled: 0,
+  }
+
+  // Atomic: rows another run already claimed are skipped, never returned twice.
+  const { data: claimed, error } = await supabase.rpc('claim_due_notifications', {
+    p_limit: MAX_DUE_NOTIFICATIONS,
+    p_lease_seconds: CLAIM_LEASE_SECONDS,
+  })
+  if (error) throw new Error(error.message)
+  const due = (claimed ?? []) as ClaimedNotification[]
+  summary.claimed = due.length
+
+  for (const n of due) {
     try {
+      if (!(await renewClaim(supabase, n))) {
+        summary.lost_claim++
+        continue
+      }
+
       const { data: subs } = await supabase
         .from('push_subscriptions')
         .select('id, endpoint, p256dh, auth, failure_count')
@@ -195,7 +233,14 @@ async function deliverDue(supabase: SupabaseClient) {
       let retryable = 0
       let lastError: string | null = null
 
+      let lostClaim = false
       for (const sub of targets) {
+        // Re-check right before each push: if the lease was lost (e.g. this run stalled),
+        // stop — the run that owns it now will handle the remaining devices.
+        if (!(await renewClaim(supabase, n))) {
+          lostClaim = true
+          break
+        }
         const result = await sendPush(sub, {
           title: n.title,
           body: n.body,
@@ -243,6 +288,11 @@ async function deliverDue(supabase: SupabaseClient) {
         if (transient && !disable) retryable++
       }
 
+      if (lostClaim) {
+        summary.lost_claim++
+        continue
+      }
+
       const anySent = alreadySent.size > 0 || okNow > 0
 
       if (retryable > 0 && attempts < MAX_DELIVERY_ATTEMPTS) {
@@ -251,6 +301,7 @@ async function deliverDue(supabase: SupabaseClient) {
           .from('notifications')
           .update({ attempt_count: attempts, last_error: lastError, updated_at: new Date().toISOString() })
           .eq('id', n.id)
+          .eq('claim_token', n.claim_token)
         summary.still_pending++
         continue
       }
@@ -266,6 +317,7 @@ async function deliverDue(supabase: SupabaseClient) {
           updated_at: new Date().toISOString(),
         })
         .eq('id', n.id)
+        .eq('claim_token', n.claim_token)
       if (anySent) summary.sent++
       else summary.failed++
     } catch (err) {

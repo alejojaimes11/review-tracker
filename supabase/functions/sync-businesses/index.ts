@@ -1,6 +1,7 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 import { corsHeaders } from '../_shared/cors.ts'
 import { getReviewStats } from '../_shared/apify.ts'
+import { callerIsBackend } from '../_shared/backend-auth.ts'
 
 /**
  * Notification Engine hook: the sync only records FACTS (notification_events);
@@ -31,6 +32,15 @@ async function recordSyncFailure(businessId: string | null, message: string, run
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
+  }
+
+  // Only the cron / backend may run a sync. verify_jwt lets the public key
+  // through, and a sync costs Apify credit, so a browser must never trigger it.
+  if (!(await callerIsBackend(req))) {
+    return new Response(JSON.stringify({ error: 'No autorizado.' }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 401,
+    })
   }
 
   const startedAt = Date.now()

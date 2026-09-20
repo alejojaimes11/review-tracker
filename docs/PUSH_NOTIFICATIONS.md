@@ -221,3 +221,60 @@ Pruebas automáticas: `deno test supabase/functions/_shared/notification-rules_t
 reglas). Ejecutarlas desde un directorio sin `package.json`.
 
 Pendiente de comprobar por una persona: que la notificación **aparezca físicamente** en el iPhone y en el PC (el servicio push la aceptó en ambos).
+
+---
+
+# Endurecimiento posterior a la auditoría de la Fase 2
+
+Dos hallazgos de la auditoría final, corregidos sin cambiar agrupación, silencio, snapshots, UI, service worker, VAPID, `register-push` ni `send-test-push`.
+
+## 1. `sync-businesses` solo para backend
+
+Hallazgo: `verify_jwt = true` deja pasar también la clave pública del frontend, así que cualquiera con esa clave podía disparar un sync
+(gasta crédito de Apify y puede generar eventos `sync_failed`).
+
+Corrección: `_shared/backend-auth.ts` (`callerIsBackend`), el mismo principio que ya usaba `notification-engine`. Quien llama debe poder leer una
+tabla exclusiva de `service_role` (`admin_users`); funciona con cualquier formato de clave y rechaza la clave pública, el token de un usuario y
+tokens falsos. `sync-businesses` lo comprueba antes de hacer nada (10 líneas añadidas, ninguna existente modificada). El motor pasó a usar el mismo helper.
+
+El único que llama al sync es el cron (`sync-businesses-every-6h`, con la clave de Vault); ningún frontend lo invoca.
+
+## 2. Un solo worker envía cada notificación (claim + lease + fencing)
+
+Hallazgo: la etapa de envío leía las notificaciones pendientes sin bloquearlas; dos ejecuciones solapadas del motor (cron + llamada manual,
+dos crons lentos, un reintento tras timeout) podían enviar la misma notificación dos veces.
+
+Migración `0024_notification_claims.sql`:
+- `notifications.claimed_at` y `notifications.claim_token`.
+- `claim_due_notifications(p_limit, p_lease_seconds)`: en una sola sentencia atómica (`FOR UPDATE SKIP LOCKED`) marca como reclamadas las
+  notificaciones vencidas y sin reclamar (o cuyo lease expiró) y devuelve **solo** las que esa ejecución ganó, con un `claim_token` propio.
+  Solo `service_role` puede ejecutarla.
+- `engine_commit` ahora tampoco fusiona actividad nueva en una notificación reclamada (`claimed_at is null`). Sin esto, una notificación que
+  se está enviando podía recibir eventos ya marcados como procesados que nunca se anunciarían. La agrupación normal no cambia.
+
+Motor (`notification-engine`):
+- Reclama antes de enviar. Lo que otra ejecución ya reclamó no se devuelve.
+- El `claim_token` funciona como **token de fencing**: renueva el lease antes de empezar y **antes de cada push**, y las escrituras que cierran la
+  notificación llevan `and claim_token = …`. Una ejecución que perdió el claim (lease vencido) se detiene y no puede sobrescribir a la nueva dueña.
+- El claim es un **lease de 300 s**: si una ejecución muere o hace timeout, el claim expira y un ciclo posterior retoma la notificación
+  (más largo que la ejecución más lenta, más corto que los 15 min del cron). Un reintento por error temporal conserva el claim hasta que expire,
+  así hay una espera natural antes de reintentar.
+- `notification_deliveries` se comporta igual: se saltan los dispositivos con entrega `sent`.
+- El resumen del motor cambia: `due` → `claimed`, y se agrega `lost_claim`.
+
+Límite que un claim no puede cubrir: si una ejecución cae **entre** "el proveedor aceptó el push" y "guardé la entrega", el reintento reenvía a ese
+dispositivo. Ahí sigue actuando el `tag` (el reenvío reemplaza la notificación en el dispositivo). Es una ventana de milisegundos; no se probó físicamente.
+
+## QA de este endurecimiento
+
+| Prueba | Resultado |
+|---|---|
+| `sync-businesses` sin cabecera / con clave pública / con token falso | 401 en los tres (con la clave pública lo rechaza el guard: antes el gateway la dejaba pasar) |
+| Tras 3 intentos con la clave pública | Estado idéntico: 14 eventos, 915 snapshots, mismo último update y misma huella del estado de sync |
+| `sync-businesses` con la clave de backend (igual que el cron) | 200, `checked: 13` (el sync corrió; los 402 son el crédito de Apify) |
+| Motor: 3 ejecuciones simultáneas sobre 1 notificación | 1 solo worker con `claimed: 1` y `pushes_ok: 2`; los otros dos `claimed: 0`. 1 notificación, 2 entregas (una por dispositivo), 0 duplicadas |
+| Motor repetido tras completar | 0 notificaciones y 0 entregas nuevas |
+| Cron real de las 16:45 con el motor nuevo | `succeeded`; descartó 7 eventos por enfriamiento (`recently_alerted`) sin enviar nada |
+| SQL determinista (transacción con rollback) | Solo un worker reclama; la futura no se reclama; token ajeno = 0 filas; tras expirar el lease otro worker reclama y el token viejo pierde el derecho; no se fusiona en una reclamada, sí en una sin reclamar |
+
+Pendiente de observar: el cron real del sync de las 18:00 (hora Colombia) con la clave de Vault. La llamada manual con esa misma clave ya fue aceptada.
