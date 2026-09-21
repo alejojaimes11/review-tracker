@@ -66,12 +66,12 @@ Ambas se despliegan con `--no-verify-jwt` y validan ellas mismas: resuelven al u
 1. Solo el admin logueado ve el botón "🔔 Activar notificaciones" (`PushToggle`).
 2. El permiso se pide solo al hacer clic, nunca al cargar.
 3. Concedido → `pushManager.subscribe` → `register-push`. Si el servidor falla, se revierte la suscripción local.
-4. Estados: sin configurar / permiso concedido / activadas / bloqueadas / error.
+4. Estados: sin configurar / permiso concedido / activadas / bloqueadas / error / **no disponible** (navegador o contexto sin soporte de push: el botón se muestra como "🔕 Notificaciones no disponibles" —"No disponibles" en pantallas chicas— con el motivo). Desde el commit `0b591d7` el botón usa etiquetas cortas en móvil (Activadas / Bloqueadas / Activar / Error).
 5. Bloqueadas: el navegador no vuelve a preguntar; hay que habilitarlas en la configuración del sitio.
 
 ## Limitaciones
 
-- **iPhone/iPad:** solo con la app instalada en la pantalla de inicio (iOS 16.4+). En Safari normal el botón no aparece.
+- **iPhone/iPad:** solo con la app instalada en la pantalla de inicio (iOS 16.4+). En Safari normal el botón **sí aparece** (solo para el admin), pero como "🔕 Notificaciones no disponibles" con el motivo; no se puede activar ahí.
 - **Escritorio:** con Chrome completamente cerrado, Windows solo recibe si "Seguir ejecutando aplicaciones en segundo plano" está activo.
 - Un endpoint es propio de un navegador y perfil; otro navegador u otro dispositivo es otra fila.
 
@@ -84,7 +84,7 @@ Producción (manual):
 1. Entrar en `/admin`, aceptar "Actualizar" si aparece, ir al dashboard.
 2. "🔔 Activar notificaciones" → permitir. Verificar la fila en `push_subscriptions`.
 3. "Prueba en 20 s" → cerrar la pestaña → esperar → debe llegar "Review Tracker · 🔔 Esta es una notificación de prueba."
-4. Clic en la notificación → abre Review Tracker.
+4. Clic en la notificación → abre Review Tracker. *(Paso de diseño: hasta el 2026-09-20 ninguna validación registrada confirma el clic en un dispositivo real.)*
 5. Repetir activar/desactivar: sigue habiendo una sola fila por dispositivo.
 6. Sin sesión de admin, `send-test-push` y `register-push` responden 403.
 
@@ -111,12 +111,12 @@ cron independiente cada 15 min ──► notification-engine
 | Tabla | Qué guarda | Acceso |
 |---|---|---|
 | `notification_events` | Hechos: `event_key` (único), `event_type`, `business_id`, `payload`, `occurred_at`, `processed_at`, `notification_id`, `skipped_reason`. | Solo `service_role`. |
-| `notifications` | Mensaje concreto: `recipient_user_id`, `type`, `title`, `body`, `data`, `status` (pending/sent/failed), `scheduled_for`, `sent_at`, `read_at`, `attempt_count`, `last_error`. Genérica: sirve para cualquier tipo. | El usuario **lee solo las suyas y ya vencidas**, y solo puede cambiar `read_at`. Sin insert ni delete. |
+| `notifications` | Mensaje concreto: `recipient_user_id`, `type`, `title`, `body`, `data`, `status` (pending/sent/failed), `scheduled_for`, `sent_at`, `read_at`, `attempt_count`, `last_error`; y, desde la migración 0024 (ver "Endurecimiento"), `claimed_at` y `claim_token`. Genérica: sirve para cualquier tipo. | El usuario **lee solo las suyas y ya vencidas**, y solo puede cambiar `read_at`. Sin insert ni delete. |
 | `notification_deliveries` | Un intento por (notificación, dispositivo): estado, intentos, `delivered_at`, `error_code`, `error_message`. Único por `(notification_id, push_subscription_id)`. | Solo `service_role`. |
 | `notification_engine_state` | `events_from`: instante de lanzamiento. Nada anterior genera eventos (evita una ráfaga con el historial). | Solo `service_role`. |
 
 Funciones SQL (solo `service_role`, `search_path` fijado en la migración 0023):
-`emit_review_gained_events(p_since)` y `engine_commit(...)`.
+`emit_review_gained_events(p_since)` y `engine_commit(...)`; desde la migración 0024, también `claim_due_notifications(p_limit, p_lease_seconds)`.
 
 ## Eventos
 
@@ -168,8 +168,11 @@ lo reutilizarán otros tipos.
 - **`notification-engine`** — `verify_jwt = true` y además comprueba que quien llama pueda leer una tabla exclusiva de `service_role`
   (funciona con cualquier formato de clave). Con la clave pública, sin cabecera o con token falso: 401. No hace scraping, no llama a Apify,
   no toca `current_reviews`.
-- **`sync-businesses`** — cambio aditivo (42 líneas, ninguna existente modificada): `recordSyncFailure()` y una llamada final a
-  `emit_review_gained_events`, ambas dentro de `try/catch` que se tragan sus errores.
+- **`sync-businesses`** — en la Fase 2 el cambio fue aditivo (42 líneas, ninguna existente modificada): `recordSyncFailure()` y una llamada final a
+  `emit_review_gained_events`, ambas dentro de `try/catch` que se tragan sus errores. **Estado actual (v16):** desde entonces se agregaron el guard de solo backend
+  (+10 líneas, ver "Endurecimiento §1") y el parámetro `force` (+6 líneas, ver `sync-now`).
+- **`sync-now`** (v1, agregada después de la Fase 2 con el botón "↻ Actualizar reseñas"; `verify_jwt` false) — valida en servidor que quien llama sea admin
+  (`getAdminUserId`; 403 si no) y dispara `sync-businesses` con `{ force: true }` y la clave de backend, en segundo plano. Responde 409 si hubo actividad en los últimos 90 s.
 
 ## Cron (migración `0022_notification_engine_cron.sql`)
 
@@ -181,13 +184,17 @@ lo reutilizarán otros tipos.
 `NotificationBell` (solo admin, junto a `PushToggle`): contador de no leídas, últimas 30 notificaciones, título, mensaje, hora relativa y
 leída/sin leer. Clic: marca como leída y navega a `data.url`. "Marcar todas como leídas". Lee `notifications` directo con RLS (refresco cada 60 s).
 
-## Cambios a la Fase 1 (los únicos)
+## Cambios a la Fase 1
+
+En el commit de la Fase 2 (`d67a83b`) los únicos fueron:
 
 1. `_shared/push.ts`: campo opcional `tag` en `PushPayload`. Necesario para que un reenvío reemplace la notificación en el dispositivo.
    `push-sw.js` ya soportaba `tag`, así que no se tocó.
 2. `PushToggle.tsx`: solo clases de fondo opaco en sus dos paneles flotantes (eran translúcidos y el texto de abajo se mezclaba).
 
 No se tocaron `push-sw.js`, VAPID, `register-push`, `send-test-push` ni la configuración PWA.
+
+**Posterior (2026-09-20):** el commit `0b591d7` (UI responsive) volvió a modificar `PushToggle.tsx` (etiquetas cortas en móvil, `whitespace-nowrap`, paneles a todo el ancho; +22/−14). Según el historial de git, `push-sw.js`, `register-push` y `send-test-push` solo se modificaron en el commit de la Fase 1 (`7e2adc5`).
 
 ## Decisiones
 
@@ -220,7 +227,7 @@ Datos: con transacciones que se revierten (casos 1 a 6). Envío real: negocios d
 Pruebas automáticas: `deno test supabase/functions/_shared/notification-rules_test.ts` (10 pruebas: horas de silencio, formato, fusión,
 reglas). Ejecutarlas desde un directorio sin `package.json`.
 
-Pendiente de comprobar por una persona: que la notificación **aparezca físicamente** en el iPhone y en el PC (el servicio push la aceptó en ambos).
+Estado de la comprobación física (actualizado 2026-09-20): la notificación **apareció físicamente en el iPhone** (validación de Fase 1 y de Fase 2 confirmadas por el usuario). En el PC el servicio push (FCM) la aceptó, pero **la recepción física no fue reportada**: sigue sin confirmación. Tampoco se ha observado una notificación real dentro de la ventana de silencio (el caso 9 se probó con `scheduled_for` a futuro).
 
 ---
 
@@ -237,7 +244,7 @@ Corrección: `_shared/backend-auth.ts` (`callerIsBackend`), el mismo principio q
 tabla exclusiva de `service_role` (`admin_users`); funciona con cualquier formato de clave y rechaza la clave pública, el token de un usuario y
 tokens falsos. `sync-businesses` lo comprueba antes de hacer nada (10 líneas añadidas, ninguna existente modificada). El motor pasó a usar el mismo helper.
 
-El único que llama al sync es el cron (`sync-businesses-every-6h`, con la clave de Vault); ningún frontend lo invoca.
+Quién puede invocar el sync hoy: solo llamadores con clave de backend. Lo llaman (a) el cron (`sync-businesses-every-6h`, con la clave de Vault) y (b) la Edge Function `sync-now`, con la clave de backend del entorno, después de validar que el usuario es admin. **Ningún frontend lo invoca directamente**; el botón "↻ Actualizar reseñas" llama a `sync-now`, no a `sync-businesses`. *(Redacción original: "el único que llama al sync es el cron"; dejó de ser cierta con el commit `dfa4405`.)*
 
 ## 2. Un solo worker envía cada notificación (claim + lease + fencing)
 
@@ -277,4 +284,4 @@ dispositivo. Ahí sigue actuando el `tag` (el reenvío reemplaza la notificació
 | Cron real de las 16:45 con el motor nuevo | `succeeded`; descartó 7 eventos por enfriamiento (`recently_alerted`) sin enviar nada |
 | SQL determinista (transacción con rollback) | Solo un worker reclama; la futura no se reclama; token ajeno = 0 filas; tras expirar el lease otro worker reclama y el token viejo pierde el derecho; no se fusiona en una reclamada, sí en una sin reclamar |
 
-Pendiente de observar: el cron real del sync de las 18:00 (hora Colombia) con la clave de Vault. La llamada manual con esa misma clave ya fue aceptada.
+Observado después (2026-09-20): el cron real del sync de las 18:00 (hora Colombia) con la clave de Vault corrió `succeeded` con HTTP 200 y el guard activo (reportó errores 402 de Apify por falta de crédito, no del guard). La llamada manual con esa misma clave ya había sido aceptada.
