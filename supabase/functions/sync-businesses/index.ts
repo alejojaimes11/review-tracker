@@ -43,6 +43,11 @@ Deno.serve(async (req) => {
     })
   }
 
+  // The admin's "update everything now" button sends { force: true }: sync every
+  // active business, not only the ones whose update_frequency_hours is due.
+  const body = await req.json().catch(() => ({}))
+  const force = body?.force === true
+
   const startedAt = Date.now()
   const runBucket = new Date(startedAt).toISOString().slice(0, 13) // e.g. 2026-09-20T05
 
@@ -65,6 +70,7 @@ Deno.serve(async (req) => {
 
     const now = Date.now()
     const due = (businesses ?? []).filter((b) => {
+      if (force) return true
       if (!b.last_synced_at) return true
       const elapsedHours = (now - new Date(b.last_synced_at).getTime()) / 3_600_000
       return elapsedHours >= b.update_frequency_hours

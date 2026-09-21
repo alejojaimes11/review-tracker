@@ -15,6 +15,7 @@ import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { useIsAdmin } from '../hooks/useAdmin'
 import { PushToggle } from '../components/PushToggle'
 import { NotificationBell } from '../components/NotificationBell'
+import { SyncNowButton } from '../components/SyncNowButton'
 import { supabase } from '../lib/supabase'
 import {
   Badge,
@@ -510,6 +511,7 @@ export default function Dashboard() {
             popovers inside anchor to this row (relative) instead of to one button. */}
         <div className="relative flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
           <AddBusinessForm />
+          {isAdmin && <SyncNowButton />}
           {isAdmin && <NotificationBell />}
           {isAdmin && <PushToggle />}
           {isAdmin && <TrashSection />}
