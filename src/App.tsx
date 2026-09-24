@@ -2,6 +2,7 @@ import { Route, Routes } from 'react-router-dom'
 import Dashboard from './pages/Dashboard'
 import BusinessDetail from './pages/BusinessDetail'
 import AdminLogin from './pages/AdminLogin'
+import ClientView from './pages/ClientView'
 import { UpdatePrompt } from './components/UpdatePrompt'
 
 export default function App() {
@@ -11,6 +12,8 @@ export default function App() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/admin" element={<AdminLogin />} />
         <Route path="/business/:id" element={<BusinessDetail />} />
+        <Route path="/c" element={<ClientView />} />
+        <Route path="/c/:token" element={<ClientView />} />
       </Routes>
       <UpdatePrompt />
     </>

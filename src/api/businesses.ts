@@ -1,48 +1,82 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FunctionsHttpError } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
+import { useIsAdmin } from '../hooks/useAdmin'
 import type { Analysis, Business, ReviewSnapshot } from '../types'
 
 /** Edge Functions are public by design and always get the anon key, so a logged-in admin session token can't get them rejected. */
 const FUNCTION_HEADERS = { Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` }
 
+// Visitors (anon) may only read an explicit allow-list of businesses columns (migration 0025).
+// A select('*') as anon fails, so the public queries name their columns. The admin session
+// (authenticated) keeps full access.
+const PUBLIC_COLUMNS =
+  'id, maps_url, name, photo_url, category, initial_reviews, current_reviews, initial_rating, current_rating, started_at, stopped_at, status, last_synced_at, last_growth_at, monthly_goal, deleted_at, created_at, updated_at'
+
+type PublicBusiness = Omit<
+  Business,
+  'billing_day' | 'update_frequency_hours' | 'low_usage_days' | 'last_sync_error' | 'notes' | 'phone' | 'last_negative_review_at'
+>
+
+/** Fields hidden from visitors get neutral values, so the rest of the app is unchanged (no risk badges or billing for visitors). */
+function withHiddenDefaults(row: PublicBusiness): Business {
+  return {
+    ...row,
+    billing_day: null,
+    update_frequency_hours: 12,
+    // Infinity: the low-usage badge can never fire without the admin's real threshold.
+    low_usage_days: Number.POSITIVE_INFINITY,
+    last_sync_error: null,
+    notes: null,
+    phone: null,
+    last_negative_review_at: null,
+  }
+}
+
+const columnsFor = (isAdmin: boolean) => (isAdmin ? '*' : PUBLIC_COLUMNS)
+const normalize = (isAdmin: boolean, row: unknown): Business =>
+  isAdmin ? (row as Business) : withHiddenDefaults(row as PublicBusiness)
+
 export function useBusinesses() {
+  const isAdmin = useIsAdmin()
   return useQuery({
-    queryKey: ['businesses'],
+    queryKey: ['businesses', isAdmin ? 'admin' : 'public'],
     queryFn: async (): Promise<Business[]> => {
       const { data, error } = await supabase
         .from('businesses')
-        .select('*')
+        .select(columnsFor(isAdmin))
         .is('deleted_at', null)
         .order('created_at', { ascending: false })
       if (error) throw error
-      return data
+      return (data as unknown[]).map((row) => normalize(isAdmin, row))
     },
   })
 }
 
 export function useTrashedBusinesses() {
+  const isAdmin = useIsAdmin()
   return useQuery({
-    queryKey: ['businesses', 'trash'],
+    queryKey: ['businesses', 'trash', isAdmin ? 'admin' : 'public'],
     queryFn: async (): Promise<Business[]> => {
       const { data, error } = await supabase
         .from('businesses')
-        .select('*')
+        .select(columnsFor(isAdmin))
         .not('deleted_at', 'is', null)
         .order('deleted_at', { ascending: false })
       if (error) throw error
-      return data
+      return (data as unknown[]).map((row) => normalize(isAdmin, row))
     },
   })
 }
 
 export function useBusiness(id: string) {
+  const isAdmin = useIsAdmin()
   return useQuery({
-    queryKey: ['businesses', id],
+    queryKey: ['businesses', id, isAdmin ? 'admin' : 'public'],
     queryFn: async (): Promise<Business> => {
-      const { data, error } = await supabase.from('businesses').select('*').eq('id', id).single()
+      const { data, error } = await supabase.from('businesses').select(columnsFor(isAdmin)).eq('id', id).single()
       if (error) throw error
-      return data
+      return normalize(isAdmin, data)
     },
   })
 }

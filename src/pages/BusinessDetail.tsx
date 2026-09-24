@@ -15,6 +15,7 @@ import { useTheme } from '../hooks/useTheme'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { Button, Card, Delta, FOCUS_RING, Icon, ProgressBar, Skeleton, StarRating } from '../components/ui'
 import { AnalysisView } from '../components/AnalysisView'
+import { AccessLinkPanel } from '../components/AccessLinkPanel'
 import { useIsAdmin } from '../hooks/useAdmin'
 import { getCategoryVisual, monthlyGained } from '../lib/business'
 import type { Analysis, Business, ReviewSnapshot } from '../types'
@@ -733,6 +734,8 @@ export default function BusinessDetail() {
         <HistoryPanel business={business} snapshots={snapshots} loading={loadingSnapshots} />
         <AiInsights businessId={business.id} />
       </div>
+
+      {isAdmin && <AccessLinkPanel businessId={business.id} businessName={business.name} />}
 
       <h2 className="mb-3 mt-8 text-lg font-medium text-gray-900 dark:text-gray-100">Crecimiento de reseñas</h2>
       <Card className="p-4">{snapshots && <GrowthChart snapshots={snapshots} />}</Card>
