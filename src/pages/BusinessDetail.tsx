@@ -17,7 +17,9 @@ import { Button, Card, Delta, FOCUS_RING, Icon, ProgressBar, Skeleton, StarRatin
 import { AnalysisView } from '../components/AnalysisView'
 import { AccessLinkPanel } from '../components/AccessLinkPanel'
 import { useIsAdmin } from '../hooks/useAdmin'
-import { getCategoryVisual, monthlyGained } from '../lib/business'
+import { useJudgeTour } from '../hooks/useJudgeTour'
+import { TourAnalysisCallout } from '../components/JudgeTour'
+import { getCategoryVisual, monthComparison, monthlyGained } from '../lib/business'
 import type { Analysis, Business, ReviewSnapshot } from '../types'
 
 function formatDateTime(iso: string) {
@@ -630,6 +632,7 @@ export default function BusinessDetail() {
   const { data: snapshots, isLoading: loadingSnapshots } = useSnapshots(id!)
   const online = useOnlineStatus()
   const isAdmin = useIsAdmin()
+  const [tourStep, setTourStep] = useJudgeTour()
 
   if (loadingBusiness) return <DetailSkeleton />
 
@@ -646,6 +649,7 @@ export default function BusinessDetail() {
 
   const gained = business.current_reviews - business.initial_reviews
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+  const comparison = monthComparison(snapshots ?? [], business.current_reviews)
   const monthGoalProgress = business.monthly_goal
     ? monthlyGained(snapshots ?? [], business.current_reviews, monthStart)
     : 0
@@ -723,10 +727,38 @@ export default function BusinessDetail() {
         </Card>
       )}
 
+      {comparison.lastMonth !== null && (
+        <Card className="mb-6 grid grid-cols-2 gap-3 p-4 text-center">
+          <div>
+            <p className="text-2xl font-bold tabular-nums text-zinc-900 dark:text-zinc-100">
+              <Delta value={comparison.thisMonth} />
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">este mes</p>
+          </div>
+          <div>
+            <p className="text-2xl font-bold tabular-nums text-zinc-900 dark:text-zinc-100">
+              <Delta value={comparison.lastMonth} />
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">mes anterior</p>
+          </div>
+          <p className="col-span-2 text-xs text-gray-500 dark:text-gray-400">
+            {(() => {
+              const diff = Math.abs(comparison.thisMonth - comparison.lastMonth)
+              const reviews = `${diff} ${diff === 1 ? 'reseña' : 'reseñas'}`
+              if (comparison.thisMonth > comparison.lastMonth) return `Vas ${reviews} por encima del mes anterior.`
+              if (comparison.thisMonth < comparison.lastMonth) return `Te ${diff === 1 ? 'falta' : 'faltan'} ${reviews} para igualar el mes anterior.`
+              return 'Vas igual que el mes anterior.'
+            })()}
+          </p>
+        </Card>
+      )}
+
       <p className="mb-2 text-xs text-gray-400">
         Seguimiento iniciado el {new Date(business.started_at).toLocaleDateString('es-ES')}
         {business.last_synced_at && ` · última actualización ${formatDateTime(business.last_synced_at)}`}
       </p>
+
+      {!isAdmin && tourStep === 'analysis' && <TourAnalysisCallout onDone={() => setTourStep(null)} />}
 
       <div className="my-6 flex flex-wrap gap-2">
         {isAdmin && <SettingsPanel business={business} />}

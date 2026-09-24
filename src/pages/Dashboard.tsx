@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   useAddBusiness,
+  useAnalyzedBusinessIds,
   useBusinesses,
   useRecentSnapshots,
   useResumeTracking,
@@ -16,6 +17,9 @@ import { useIsAdmin } from '../hooks/useAdmin'
 import { PushToggle } from '../components/PushToggle'
 import { NotificationBell } from '../components/NotificationBell'
 import { SyncNowButton } from '../components/SyncNowButton'
+import { PortfolioSummary, SearchBox } from '../components/DashboardExtras'
+import { TourButton, TourPickCard, TourWelcome } from '../components/JudgeTour'
+import { useJudgeTour } from '../hooks/useJudgeTour'
 import { supabase } from '../lib/supabase'
 import {
   Badge,
@@ -33,7 +37,15 @@ import {
   WARNING_COLOR,
   CRITICAL_COLOR,
 } from '../components/ui'
-import { buildWhatsAppLink, daysSince, dailySeries, getBusinessRisk, getCategoryVisual, monthlyGained } from '../lib/business'
+import {
+  buildWhatsAppLink,
+  daysSince,
+  dailySeries,
+  getBusinessRisk,
+  getCategoryVisual,
+  monthlyGained,
+  normalizeText,
+} from '../lib/business'
 import type { Business } from '../types'
 
 function formatDate(iso: string) {
@@ -472,6 +484,8 @@ function CategoryFilter({
 export default function Dashboard() {
   const { data: businesses, isLoading, isError, error } = useBusinesses()
   const { data: recentSnapshots } = useRecentSnapshots()
+  const { data: analyzedIds } = useAnalyzedBusinessIds()
+  const [tourStep, setTourStep] = useJudgeTour()
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
 
   const sorted = businesses
@@ -484,7 +498,13 @@ export default function Dashboard() {
     ? [...new Set(sorted.map((b) => b.category).filter((c): c is string => !!c))].sort()
     : []
 
-  const filtered = sorted?.filter((b) => selectedCategory === null || b.category === selectedCategory)
+  const [search, setSearch] = useState('')
+  const query = normalizeText(search)
+  const tourTarget = sorted?.find((b) => b.status === 'active' && analyzedIds?.has(b.id)) ?? sorted?.find((b) => b.status === 'active')
+  const filtered = sorted?.filter(
+    (b) =>
+      (selectedCategory === null || b.category === selectedCategory) && (query === '' || normalizeText(b.name).includes(query)),
+  )
   const online = useOnlineStatus()
   const isAdmin = useIsAdmin()
 
@@ -510,6 +530,7 @@ export default function Dashboard() {
         {/* On phones the actions take their own full-width row and wrap; the
             popovers inside anchor to this row (relative) instead of to one button. */}
         <div className="relative flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
+          {!isAdmin && <TourButton active={tourStep !== null} onClick={() => setTourStep(tourStep !== null ? null : 'welcome')} />}
           <AddBusinessForm />
           {isAdmin && <SyncNowButton />}
           {isAdmin && <NotificationBell />}
@@ -523,6 +544,10 @@ export default function Dashboard() {
           <ThemeToggle />
         </div>
       </div>
+
+      {!isAdmin && tourStep === 'welcome' && (
+        <TourWelcome onStart={() => setTourStep('pick')} onSkip={() => setTourStep(null)} />
+      )}
 
       {!online && (
         <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
@@ -544,9 +569,17 @@ export default function Dashboard() {
 
       {sorted && sorted.length > 0 && (
         <>
+          {!isAdmin && tourStep === 'pick' && tourTarget && (
+            <TourPickCard business={tourTarget} onPick={() => setTourStep('analysis')} onSkip={() => setTourStep(null)} />
+          )}
+          <PortfolioSummary businesses={sorted} snapshotsByBusiness={snapshotsByBusiness} monthStart={monthStart} />
           <RiskSection businesses={sorted} />
           <UpcomingBilling businesses={sorted} />
+          <SearchBox value={search} onChange={setSearch} />
           <CategoryFilter categories={categories} selected={selectedCategory} onSelect={setSelectedCategory} />
+          {filtered?.length === 0 && (
+            <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">Ningún negocio coincide con tu búsqueda.</p>
+          )}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {filtered?.map((b) => (
               <BusinessCard
@@ -562,13 +595,16 @@ export default function Dashboard() {
       )}
 
       {/* An installed app has no address bar, so /admin can't be typed there. */}
-      {!isAdmin && (
-        <p className="mt-10 text-center text-xs">
+      <p className="mt-10 flex justify-center gap-4 text-center text-xs">
+        <Link to="/como-funciona" className={`rounded text-gray-400 hover:underline dark:text-gray-500 ${FOCUS_RING}`}>
+          Cómo funciona
+        </Link>
+        {!isAdmin && (
           <Link to="/admin" className={`rounded text-gray-400 dark:text-gray-500 ${FOCUS_RING}`}>
             Acceso admin
           </Link>
-        </p>
-      )}
+        )}
+      </p>
     </div>
   )
 }

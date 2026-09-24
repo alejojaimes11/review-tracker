@@ -205,6 +205,18 @@ export function useResetBaseline(id: string) {
   })
 }
 
+/** Ids of the businesses that already have at least one saved AI analysis (public read). */
+export function useAnalyzedBusinessIds() {
+  return useQuery({
+    queryKey: ['analyses', 'business-ids'],
+    queryFn: async (): Promise<Set<string>> => {
+      const { data, error } = await supabase.from('analyses').select('business_id')
+      if (error) throw error
+      return new Set((data ?? []).map((row) => row.business_id as string))
+    },
+  })
+}
+
 export interface SnapshotPoint {
   business_id: string
   review_count: number

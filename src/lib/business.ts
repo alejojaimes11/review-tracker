@@ -1,5 +1,10 @@
 import type { Business } from '../types'
 
+/** Lowercase without accents, so "optica" finds "ÓPTICA". */
+export function normalizeText(text: string) {
+  return text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
+}
+
 export function daysSince(iso: string) {
   return (Date.now() - new Date(iso).getTime()) / 86_400_000
 }
@@ -52,6 +57,23 @@ export function getBusinessRisk(business: Business) {
 interface SnapshotLike {
   review_count: number
   created_at: string
+}
+
+/**
+ * This month vs the previous month, with the same baseline rule as monthlyGained (the earliest
+ * snapshot of each month). `lastMonth` is null when there is no snapshot in the previous month,
+ * so a business younger than a month never shows a made-up comparison.
+ */
+export function monthComparison(snapshots: SnapshotLike[], currentReviews: number, now: Date = new Date()) {
+  const thisStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  const lastStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+  const sorted = [...snapshots].sort((a, b) => a.created_at.localeCompare(b.created_at))
+  const firstThis = sorted.find((s) => new Date(s.created_at) >= thisStart)
+  const firstLast = sorted.find((s) => new Date(s.created_at) >= lastStart && new Date(s.created_at) < thisStart)
+
+  const thisMonth = firstThis ? currentReviews - firstThis.review_count : 0
+  const lastMonth = firstLast ? (firstThis ? firstThis.review_count : currentReviews) - firstLast.review_count : null
+  return { thisMonth, lastMonth }
 }
 
 /** Reviews gained since the start of `monthStart`, using the earliest snapshot in that range as baseline. */
