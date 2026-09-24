@@ -244,7 +244,7 @@ Corrección: `_shared/backend-auth.ts` (`callerIsBackend`), el mismo principio q
 tabla exclusiva de `service_role` (`admin_users`); funciona con cualquier formato de clave y rechaza la clave pública, el token de un usuario y
 tokens falsos. `sync-businesses` lo comprueba antes de hacer nada (10 líneas añadidas, ninguna existente modificada). El motor pasó a usar el mismo helper.
 
-Quién puede invocar el sync hoy: solo llamadores con clave de backend. Lo llaman (a) el cron (`sync-businesses-every-6h`, con la clave de Vault) y (b) la Edge Function `sync-now`, con la clave de backend del entorno, después de validar que el usuario es admin. **Ningún frontend lo invoca directamente**; el botón "↻ Actualizar reseñas" llama a `sync-now`, no a `sync-businesses`. *(Redacción original: "el único que llama al sync es el cron"; dejó de ser cierta con el commit `dfa4405`.)*
+Quién puede invocar el sync hoy: solo llamadores con clave de backend. Lo llaman (a) el cron (`sync-businesses-noon-and-evening`, antes `sync-businesses-every-6h`, con la clave de Vault) y (b) la Edge Function `sync-now`, con la clave de backend del entorno, después de validar que el usuario es admin. **Ningún frontend lo invoca directamente**; el botón "↻ Actualizar reseñas" llama a `sync-now`, no a `sync-businesses`. *(Redacción original: "el único que llama al sync es el cron"; dejó de ser cierta con el commit `dfa4405`.)*
 
 ## 2. Un solo worker envía cada notificación (claim + lease + fencing)
 
